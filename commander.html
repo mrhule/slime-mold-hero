@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Commander stand-in</title>
+    <style>
+      body { margin: 0; padding: 16px; background: #10130d; color: #e8ead9; font: 15px/1.5 system-ui, sans-serif; display: grid; gap: 14px; justify-items: start; }
+      h1 { margin: 0; font: 28px Impact, 'Arial Black', sans-serif; color: #f3cf57; letter-spacing: 2px; }
+      button, input { font: inherit; padding: 8px 14px; border: 3px solid #0b0b0b; background: #6f7a55; color: #fff; cursor: pointer; }
+      input { width: 90px; text-transform: uppercase; text-align: center; background: #11140e; cursor: text; }
+      .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+      canvas { background: #1b2016; border: 3px solid #0b0b0b; touch-action: none; max-width: 100%; }
+      pre { margin: 0; background: #181c13; border: 2px solid #0b0b0b; padding: 8px 12px; min-height: 90px; width: min(100%, 420px); font-size: 12px; overflow: auto; }
+      #status { font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <h1>Commander stand-in</h1>
+    <p>Stands in for Slime Mold while it has no link of its own. Host a room or join one, then click the dish to drop a marker in the hero's arena.</p>
+    <div class="row">
+      <button id="host">Host a room</button>
+      <input id="code" maxlength="4" placeholder="CODE" autocomplete="off" />
+      <button id="join">Join</button>
+      <button id="leave">Leave</button>
+      <button id="ping">Ping</button>
+    </div>
+    <div id="status">Solo</div>
+    <canvas id="dish" width="300" height="300"></canvas>
+    <pre id="log"></pre>
+    <script type="module" src="/commander/main.ts"></script>
+  </body>
+</html>

@@ -46,6 +46,24 @@ Pick one on the title screen. Each has its own stats, weapon and spell, and all 
 To add a mold, add an entry to `CHARACTERS` in `src/characters.ts` (set `locked: false`, give it a `portrait`
 from `public/art/commander-*.webp`). Nothing else needs to change.
 
+## Co-op (work in progress)
+
+The game works alone. A second player on the same Wi-Fi can link a commander to it; the design is in
+`docs/co-op-design.html`. This is step 1 of its build order: the link layer, a lobby and a marker.
+
+```bash
+npm run lan        # same as dev, but reachable from other devices on your network
+```
+
+- The dev server also runs the **relay** (rooms by 4 letter code, no game logic) at `/link`. Open the printed
+  Network address on each device.
+- In the game choose **Co-op → Host a room** and read out the code, or open the page with `?join=CODE`.
+- `/commander.html` is a stand-in commander for trying the link: join with the code, then click the dish to drop
+  a marker in the hero's arena. A `ping` shows the round trip time.
+- If a device drops off it keeps its seat for 60 seconds and rejoins on its own; after that, or if either side leaves,
+  both games carry on solo.
+- `link/` holds the protocol, relay and client shared by the games. `vite preview` serves the relay too.
+
 ## Run it
 
 ```bash

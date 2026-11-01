@@ -9,6 +9,19 @@ export interface UiHandlers {
   retry(): void;
   menu(): void;
   resume(): void;
+  coop(): void;
+  coopHost(): void;
+  coopJoin(code: string): void;
+  coopLeave(): void;
+  coopBack(): void;
+}
+
+export interface CoopInfo {
+  state: 'solo' | 'hosting' | 'linked' | 'dropped';
+  code: string | null;
+  peers: { role: string; name: string; online: boolean }[];
+  error: string | null;
+  busy: boolean;
 }
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -29,9 +42,14 @@ export class Ui {
   private hudEl = $<HTMLDivElement>('hud');
   private selected = 'general-goo';
   private bannerTimer = 0;
+  private linkLabel = '';
+  coopShown = false;
 
   constructor(private h: UiHandlers) {
     try { this.selected = localStorage.getItem('sms-char') ?? this.selected; } catch { /* ignore */ }
+    this.overlay.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.target as HTMLElement).id === 'codeIn') this.overlay.querySelector<HTMLElement>('[data-action=coop-join]')?.click();
+    });
     this.overlay.addEventListener('click', (e) => {
       const el = (e.target as HTMLElement).closest<HTMLElement>('[data-action]');
       if (!el || el.hasAttribute('disabled')) return;
@@ -49,6 +67,11 @@ export class Ui {
         case 'retry': this.h.retry(); break;
         case 'menu': this.h.menu(); break;
         case 'resume': this.h.resume(); break;
+        case 'coop': this.h.coop(); break;
+        case 'coop-host': this.h.coopHost(); break;
+        case 'coop-join': this.h.coopJoin((this.overlay.querySelector<HTMLInputElement>('#codeIn')?.value ?? '').trim()); break;
+        case 'coop-leave': this.h.coopLeave(); break;
+        case 'coop-back': this.h.coopBack(); break;
       }
     });
   }
@@ -60,6 +83,7 @@ export class Ui {
   }
 
   private show(html: string): void {
+    this.coopShown = false;
     this.overlay.hidden = false;
     this.overlay.innerHTML = html;
     document.body.classList.add('menu');
@@ -81,6 +105,7 @@ export class Ui {
           <span class="kb"><b>WASD</b> move &nbsp; <b>Left mouse</b> shoot &nbsp; <b>Right mouse</b> cast ${sel.spell.name} &nbsp; <b>Esc</b> pause &nbsp; <b>M</b> mute</span><span class="tc"><b>Left thumb</b> move &nbsp; <b>Right thumb</b> drag to aim and shoot &nbsp; <b>✦ button</b> cast ${sel.spell.name}</span>
         </div>
         <button class="big" data-action="play">Play as ${sel.name}</button>
+        <button data-action="coop">Co-op${this.linkLabel ? ' · ' + this.linkLabel : ''}</button>
         <p class="best">Best wave with ${sel.name}: ${loadBest(sel.id)}</p>
       </div>`);
   }
@@ -153,8 +178,48 @@ export class Ui {
       <div class="screen pause">
         <h1>Paused</h1>
         <button class="big" data-action="resume">Resume</button>
+        <button data-action="coop">Co-op${this.linkLabel ? ' · ' + this.linkLabel : ''}</button>
         <button data-action="menu">Quit to mold select</button>
       </div>`);
+  }
+
+  /** short status for the HUD pill and the Co-op buttons; null when solo */
+  setLink(text: string | null): void {
+    this.linkLabel = text ?? '';
+    const pill = $('linkPill');
+    pill.hidden = !text;
+    pill.textContent = text ?? '';
+  }
+
+  showCoop(info: CoopInfo): void {
+    const peers = info.peers.map((p) => `<li>${p.online ? '●' : '○'} ${p.role === 'cmd' ? 'Commander' : 'Hero'} (${p.name})${p.online ? '' : ' · reconnecting'}</li>`).join('');
+    let body: string;
+    if (info.state === 'solo') {
+      body = `
+        <p class="sub">Play with a commander on another device on the same Wi-Fi.</p>
+        <button class="big" data-action="coop-host" ${info.busy ? 'disabled' : ''}>Host a room</button>
+        <div class="join"><input id="codeIn" maxlength="4" placeholder="CODE" autocomplete="off" autocapitalize="characters" spellcheck="false"><button data-action="coop-join" ${info.busy ? 'disabled' : ''}>Join</button></div>`;
+    } else if (info.state === 'hosting') {
+      body = `
+        <p class="sub">Give this code to the commander.</p>
+        <div class="code">${info.code}</div>
+        <p class="sub">Waiting for them to join. You can keep playing.</p>
+        <button data-action="coop-leave">Cancel</button>`;
+    } else {
+      body = `
+        <div class="code small">${info.code}</div>
+        <ul class="peers">${peers}</ul>
+        <p class="sub">${info.state === 'dropped' ? 'The link is down. Trying to reconnect, and play carries on meanwhile.' : 'Linked.'}</p>
+        <button data-action="coop-leave">Leave</button>`;
+    }
+    this.show(`
+      <div class="screen coop">
+        <h1>Co-op</h1>
+        ${body}
+        ${info.error ? `<p class="err">${info.error}</p>` : ''}
+        <button data-action="coop-back">Back</button>
+      </div>`);
+    this.coopShown = true;
   }
 
   banner(text: string, boss = false): void {
