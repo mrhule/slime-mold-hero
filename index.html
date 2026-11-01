@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#080a07" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <title>Slime Mold: Hero</title>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <div id="hud" hidden>
+      <div class="bars">
+        <div class="bar hp"><i id="hpFill"></i><span id="hpText"></span></div>
+        <div class="bar mana"><i id="manaFill"></i><span id="manaText"></span></div>
+      </div>
+      <div class="wave"><b id="waveNum"></b><small id="waveLeft"></small></div>
+      <div class="gold" id="gold"></div>
+      <button class="pause" id="pauseBtn" aria-label="Pause">❚❚</button>
+      <div class="spell"><div id="spellIcon"></div><small id="spellName"></small></div>
+      <div class="boss" id="bossBar" hidden><i id="bossFill"></i><span>RIVAL COMMANDER</span></div>
+    </div>
+    <div id="banner"></div>
+    <div id="overlay" hidden></div>
+    <div id="rotate"><div>↻<br>Rotate your device<br><small>Slime Mold: Hero plays in landscape</small></div></div>
+    <div id="loading">Growing…</div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

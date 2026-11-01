@@ -1,0 +1,370 @@
+<title>Slime Link Co-op Design</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bangers&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column, full-width figures. Palette comes from the games: ink black, olive ground, goo gold, commander green, hero amber, relay slate. */
+:root {
+  --bg: #eceee6;
+  --panel: #f8f9f4;
+  --ink: #14170f;
+  --muted: #565d4a;
+  --line: #2a2f22;
+  --gold: #a87400;
+  --cmd: #3f7d2b;
+  --cmd-bg: #dfeccf;
+  --hero: #b4560c;
+  --hero-bg: #f6e0c4;
+  --relay: #3f5873;
+  --relay-bg: #dbe4ee;
+  --warn-bg: #f3e8bd;
+  --display: 'Bangers', Impact, 'Arial Black', sans-serif;
+  --body: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+  --mono: 'IBM Plex Mono', Consolas, 'Courier New', monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #10130d; --panel: #181c13; --ink: #e8ead9; --muted: #9aa28a; --line: #cfd4bd; --gold: #f3cf57;
+    --cmd: #8fd264; --cmd-bg: #1f3018; --hero: #f0a64a; --hero-bg: #3a2610; --relay: #8fa6c4; --relay-bg: #1b2634; --warn-bg: #3a3413;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #10130d; --panel: #181c13; --ink: #e8ead9; --muted: #9aa28a; --line: #cfd4bd; --gold: #f3cf57;
+  --cmd: #8fd264; --cmd-bg: #1f3018; --hero: #f0a64a; --hero-bg: #3a2610; --relay: #8fa6c4; --relay-bg: #1b2634; --warn-bg: #3a3413;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--ink); font: 16px/1.6 var(--body); padding-block: 40px 72px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+main { max-width: 920px; margin: 0 auto; display: grid; gap: 28px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font: 500 12px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+h1 { margin: 0; font: 400 clamp(44px, 9vw, 72px)/0.95 var(--display); letter-spacing: 0.03em; text-wrap: balance; color: var(--gold); text-shadow: 3px 3px 0 var(--ink); }
+h2 { margin: 24px 0 0; font: 600 24px/1.2 var(--body); text-wrap: balance; padding-top: 14px; border-top: 3px solid var(--ink); }
+h3 { margin: 6px 0 0; font: 600 17px/1.3 var(--body); }
+p, ul, ol { margin: 0; max-width: 68ch; }
+ul, ol { padding-left: 1.2em; display: grid; gap: 6px; }
+.lede { font-size: 19px; line-height: 1.5; max-width: 62ch; }
+code { font: 500 0.88em var(--mono); background: var(--panel); border: 1px solid color-mix(in srgb, var(--line) 35%, transparent); padding: 1px 5px; border-radius: 3px; }
+pre { margin: 0; background: var(--panel); border: 2px solid var(--ink); padding: 14px 16px; overflow-x: auto; font: 400 13px/1.55 var(--mono); }
+pre code { background: none; border: 0; padding: 0; font-size: inherit; }
+figure { margin: 0; display: grid; gap: 10px; }
+figure .frame { background: var(--panel); border: 2px solid var(--ink); box-shadow: 5px 5px 0 var(--ink); padding: 12px; overflow-x: auto; }
+figure svg { display: block; width: 100%; min-width: 640px; height: auto; color: var(--ink); }
+figcaption { font-size: 14px; color: var(--muted); max-width: 72ch; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.fact { background: var(--panel); border: 2px solid var(--ink); padding: 12px 14px; display: grid; gap: 4px; align-content: start; }
+.fact b { font: 500 12px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.fact.c { border-left: 8px solid var(--cmd); } .fact.h { border-left: 8px solid var(--hero); } .fact.r { border-left: 8px solid var(--relay); }
+.tablewrap { overflow-x: auto; border: 2px solid var(--ink); background: var(--panel); }
+table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 8px 12px; border-bottom: 1px solid color-mix(in srgb, var(--line) 30%, transparent); }
+th { font: 500 12px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); background: color-mix(in srgb, var(--ink) 6%, transparent); }
+td:first-child, td:nth-child(2) { font-family: var(--mono); font-size: 13px; white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+.tag { display: inline-block; font: 500 11px var(--mono); padding: 1px 6px; border: 1.5px solid currentColor; border-radius: 3px; }
+.tag.c { color: var(--cmd); } .tag.h { color: var(--hero); } .tag.b { color: var(--relay); }
+.note { background: var(--warn-bg); border: 2px solid var(--ink); padding: 12px 16px; max-width: 72ch; }
+.note b { font-weight: 600; }
+
+/* diagram classes (styling lives here because SVGs stay self-contained) */
+svg text { fill: currentColor; font: 500 12px var(--mono); }
+svg .t { font: 600 14px var(--body); }
+svg .s { font: 400 12px var(--body); fill: var(--muted); }
+svg .lbl { font: 500 11px var(--mono); }
+svg .box { fill: var(--panel); stroke: var(--line); stroke-width: 2; }
+svg .cmd { fill: var(--cmd-bg); stroke: var(--cmd); stroke-width: 2.5; }
+svg .hero { fill: var(--hero-bg); stroke: var(--hero); stroke-width: 2.5; }
+svg .relay { fill: var(--relay-bg); stroke: var(--relay); stroke-width: 2.5; }
+svg .ghost { fill: none; stroke: var(--hero); stroke-width: 2; stroke-dasharray: 6 5; }
+svg .arr { fill: none; stroke: currentColor; stroke-width: 1.8; marker-end: url(#a); }
+svg .arr.d { stroke-dasharray: 6 5; }
+svg .life { stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 3 6; opacity: 0.6; }
+svg .note { fill: var(--warn-bg); stroke: var(--line); stroke-width: 1.5; }
+svg .ours { fill: var(--cmd-bg); stroke: var(--cmd); stroke-width: 3; }
+svg .rival { fill: color-mix(in srgb, #8a58c4 22%, var(--panel)); stroke: #8a58c4; stroke-width: 3; }
+svg .front { fill: var(--gold); stroke: var(--ink); stroke-width: 2.5; }
+svg .fronttxt { fill: #14170f; font: 600 12px var(--mono); }
+@media (max-width: 520px) { h2 { font-size: 21px; } }
+</style>
+
+<main>
+<header>
+  <div class="eyebrow">Design brainstorm · draft 1</div>
+  <h1>Slime Link</h1>
+  <p class="lede">Two games, one fight. A commander grows the veins in <b>Slime Mold</b>. A hero drops into the battle fronts in <b>Slime Mold: Hero</b>. Each is a complete game alone, and they link over the local network when a second player joins.</p>
+</header>
+
+<div class="facts">
+  <div class="fact c"><b>Commander</b>Slime Mold. Gathers nutrients, grows veins, builds, climbs the tech tree, marks where to fight, calls artillery.</div>
+  <div class="fact h"><b>Hero</b>Slime Mold: Hero. Fights each front as a top-down shooter. Wins and losses move the line on the commander's map.</div>
+  <div class="fact r"><b>Relay</b>A small LAN message pipe. It holds rooms and forwards messages. It has no game logic.</div>
+</div>
+
+<section>
+<h2>Decisions already made</h2>
+<ul>
+  <li><b>Devices:</b> each player uses their own device. Desktop and desktop, desktop and phone, and phone and phone should all work.</li>
+  <li><b>Coupling:</b> front instances. The shooter does not share a coordinate space with the RTS. It fights an arena built from a front.</li>
+  <li><b>Stakes:</b> the hero matters a lot. A strong hero wins fronts the commander could not, and a weak one loses them.</li>
+  <li><b>Opponent:</b> the rival mold AI only. A human rival can reuse the same messages later.</li>
+  <li><b>Aiming orders:</b> while a front is open, the RTS shows a small arena view for that front. Markers and artillery are placed on that view, so the click is already in arena coordinates.</li>
+  <li><b>Pressure on everyone:</b> an open front drains the commander's nutrients as well as spending the rival's pool, so a long fight puts pressure on both players.</li>
+  <li><b>No hero wallet:</b> when linked, the hero holds no currency. The commander upgrades the hero and supplies it, all paid in nutrients. Goo and the shop exist only in Slime Mold: Hero's solo mode.</li>
+  <li><b>Talking happens in the room:</b> players sit together and talk, so the hero asks the commander out loud for upgrades, supplies or artillery. There is no chat or voice feature. The commander's hero panel must be quick to use mid-fight, and the hero's screen shows its own health, mana and upgrade levels so the player knows what to ask for.</li>
+  <li><b>The commander picks the front:</b> the hero does not choose where to fight. The commander deploys the hero to a front with <code>front.open</code>. To move the hero, the commander recalls it and deploys it to another front. A recalled front goes back to auto-resolve with the damage already dealt.</li>
+  <li><b>The hero sees a war-room map:</b> a stylised strategic board in the style of a film war table or a Risk map, showing the fronts and their pressure, with a few overall stats such as territory held and nutrient trend. It is view-only and shows the hero how the whole war is going, and which front the commander might send them to next. The commander's markers still appear in the arena itself.</li>
+  <li><b>The hero picks the mold, and upgrades belong to the hero:</b> the hero player chooses their mold from the ones unlocked, and can swap between deployments. Upgrade levels stay with that hero for good and are not shared between molds. Switching molds means switching to that mold's own levels, so a hero only grows stronger the more they play. Upgrades are shown as medals on the hero, so the hero's growth is visible. A medal is just an upgrade level and nothing separate.</li>
+  <li><b>Solo first:</b> neither game depends on the other. Multiplayer starts only when someone joins, and it ends gracefully when they leave.</li>
+</ul>
+</section>
+
+<section>
+<h2>How the pieces connect</h2>
+<p>Each game keeps its own simulation and its own authority. They never share state directly. They send each other small messages, and the receiving game decides what each message means. This is why neither game has to be rewritten.</p>
+<figure style="margin-top:14px">
+  <div class="frame">
+  <svg viewBox="0 0 880 400" role="img" aria-label="Commander and hero clients each connect to a LAN relay. Orders flow from commander to hero, reports flow from hero to commander. A second hero can connect later.">
+    <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>
+    <rect class="cmd" x="10" y="60" width="200" height="240" rx="6"/>
+    <text class="t" x="26" y="90">Slime Mold</text>
+    <text class="s" x="26" y="110">Commander · desktop or phone</text>
+    <text class="s" x="26" y="146">Owns</text>
+    <text class="lbl" x="26" y="168">map and fog of war</text>
+    <text class="lbl" x="26" y="188">nutrients and income</text>
+    <text class="lbl" x="26" y="208">tech tree</text>
+    <text class="lbl" x="26" y="228">rival AI and fronts</text>
+    <text class="s" x="26" y="266">Buys hero upgrades and artillery</text>
+
+    <rect class="relay" x="360" y="100" width="160" height="160" rx="6"/>
+    <text class="t" x="376" y="130">LAN relay</text>
+    <text class="s" x="376" y="150">Node + WebSocket</text>
+    <text class="lbl" x="376" y="184">rooms by code</text>
+    <text class="lbl" x="376" y="204">fan-out</text>
+    <text class="lbl" x="376" y="224">no game logic</text>
+
+    <rect class="hero" x="670" y="60" width="200" height="240" rx="6"/>
+    <text class="t" x="686" y="90">Slime Mold: Hero</text>
+    <text class="s" x="686" y="110">Hero · desktop or phone</text>
+    <text class="s" x="686" y="146">Owns</text>
+    <text class="lbl" x="686" y="168">the arena simulation</text>
+    <text class="lbl" x="686" y="188">hero, weapon, spell</text>
+    <text class="lbl" x="686" y="208">applies what it is sent</text>
+    <text class="lbl" x="686" y="228">front outcome</text>
+    <text class="s" x="686" y="266">Reports results upstream</text>
+
+    <path class="arr" d="M210 150 H358"/><text class="lbl" x="284" y="141" text-anchor="middle">orders</text>
+    <path class="arr" d="M358 210 H210"/><text class="lbl" x="284" y="232" text-anchor="middle">reports</text>
+    <path class="arr" d="M522 150 H668"/><text class="lbl" x="595" y="141" text-anchor="middle">orders</text>
+    <path class="arr" d="M668 210 H522"/><text class="lbl" x="595" y="232" text-anchor="middle">reports</text>
+
+    <rect class="ghost" x="670" y="330" width="200" height="56" rx="6"/>
+    <text class="t" x="686" y="354">Second hero</text>
+    <text class="s" x="686" y="373">another front, later</text>
+    <path class="arr d" d="M440 260 V358 H668"/><text class="lbl" x="452" y="350">same protocol</text>
+  </svg>
+  </div>
+  <figcaption>Orders go from commander to hero and reports come back, always through the relay. A second hero joins the same room the same way, which is what makes several fronts at once possible later.</figcaption>
+</figure>
+</section>
+
+<section>
+<h2>Solo, hosting, linked, dropped</h2>
+<p>Every game starts <b>solo</b> and behaves exactly as it does today. A <b>Host co-op</b> button opens a room with a short code and a QR code. The game stays fully playable while it waits. When a peer joins, both games switch to linked behavior. If the peer disappears, the game keeps running and the other side's systems fall back to what they do solo.</p>
+<figure style="margin-top:14px">
+  <div class="frame">
+  <svg viewBox="0 0 880 310" role="img" aria-label="Session states: solo, hosting, linked, dropped. Dropped returns to linked on rejoin, or to solo after a timeout.">
+    <rect class="box" x="10" y="115" width="150" height="70" rx="6"/>
+    <text class="t" x="26" y="143">Solo</text><text class="s" x="26" y="166">Each game as today</text>
+    <rect class="relay" x="240" y="115" width="150" height="70" rx="6"/>
+    <text class="t" x="256" y="143">Hosting</text><text class="s" x="256" y="166">Code + QR shown</text>
+    <rect class="cmd" x="470" y="115" width="150" height="70" rx="6"/>
+    <text class="t" x="486" y="143">Linked</text><text class="s" x="486" y="166">Orders and reports</text>
+    <rect class="hero" x="700" y="115" width="150" height="70" rx="6"/>
+    <text class="t" x="716" y="143">Dropped</text><text class="s" x="716" y="166">Both keep playing</text>
+
+    <path class="arr" d="M160 150 H238"/><text class="lbl" x="199" y="140" text-anchor="middle">host</text>
+    <path class="arr" d="M390 150 H468"/><text class="lbl" x="429" y="140" text-anchor="middle">peer joins</text>
+    <path class="arr" d="M620 150 H698"/><text class="lbl" x="659" y="140" text-anchor="middle">peer lost</text>
+    <path class="arr" d="M740 185 V235 H560 V187"/><text class="lbl" x="650" y="228" text-anchor="middle">rejoin within 60 s</text>
+    <path class="arr" d="M820 185 V280 H85 V187"/><text class="lbl" x="450" y="272" text-anchor="middle">timeout, or either side leaves: back to solo</text>
+  </svg>
+  </div>
+  <figcaption>Cancelling while hosting also returns to solo. A rejoin restores the link with a state snapshot from each side.</figcaption>
+</figure>
+<h3>What changes in each game when linked</h3>
+<div class="tablewrap" style="margin-top:8px"><table>
+<tr><th>Game</th><th>Solo</th><th>Linked</th><th>Dropped</th></tr>
+<tr><td>Slime Mold</td><td>Fronts auto-resolve in the existing combat sim.</td><td>Fronts a hero is fighting are decided by the hero's result. Others still auto-resolve.</td><td>All fronts auto-resolve again. The commander loses hero-only bonuses.</td></tr>
+<tr><td>Slime Mold: Hero</td><td>Endless waves in the dish, shop between waves.</td><td>Waves become front instances. No shop or wallet: the commander buys upgrades and supplies the hero, and orders arrive.</td><td>Finish the current front as solo waves, then continue solo.</td></tr>
+</table></div>
+</section>
+
+<section>
+<h2>Life of a front</h2>
+<p>A <b>front</b> exists wherever your veins touch a rival's. Today the RTS simulates it directly. With a hero linked, the commander can send the hero to a front. The front's nutrient pool, terrain seed and enemy mix are packed into one message, and the hero's game builds an arena from it. While the hero fights, the RTS shows a live pressure value for that front instead of simulating it.</p>
+<figure style="margin-top:14px">
+  <div class="frame">
+  <svg viewBox="0 0 880 520" role="img" aria-label="Sequence between commander and hero: front forms, front.open, arena built, progress reports, orders, result, resolution.">
+    <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>
+    <rect class="cmd" x="90" y="8" width="220" height="36" rx="6"/><text class="t" x="200" y="31" text-anchor="middle">Commander · Slime Mold</text>
+    <rect class="hero" x="570" y="8" width="220" height="36" rx="6"/><text class="t" x="680" y="31" text-anchor="middle">Hero · Slime Mold: Hero</text>
+    <path class="life" d="M200 44 V510"/><path class="life" d="M680 44 V510"/>
+
+    <rect class="note" x="60" y="70" width="270" height="50" rx="4"/>
+    <text class="s" x="72" y="92" style="fill:currentColor">Veins touch a rival at front f3.</text>
+    <text class="s" x="72" y="110" style="fill:currentColor">Commander sends the hero there.</text>
+
+    <path class="arr" d="M330 165 H548"/><text class="lbl" x="440" y="155" text-anchor="middle">front.open {seed, nutrients}</text>
+
+    <rect class="note" x="550" y="185" width="270" height="50" rx="4"/>
+    <text class="s" x="562" y="207" style="fill:currentColor">Arena built from the seed.</text>
+    <text class="s" x="562" y="225" style="fill:currentColor">Waves sized to the nutrient pool.</text>
+
+    <rect class="note" x="60" y="250" width="270" height="50" rx="4"/>
+    <text class="s" x="72" y="272" style="fill:currentColor">Pressure meter moves the line:</text>
+    <text class="s" x="72" y="290" style="fill:currentColor">veins push or recede.</text>
+    <path class="arr d" d="M550 275 H332"/><text class="lbl" x="441" y="265" text-anchor="middle">front.progress · 1 Hz</text>
+
+    <path class="arr d" d="M330 350 H548"/><text class="lbl" x="440" y="340" text-anchor="middle">marker · artillery · supply</text>
+
+    <path class="arr" d="M550 415 H332"/><text class="lbl" x="441" y="405" text-anchor="middle">front.result {won, loot}</text>
+
+    <rect class="note" x="60" y="440" width="270" height="50" rx="4"/>
+    <text class="s" x="72" y="462" style="fill:currentColor">Resolved. Rival cells wither,</text>
+    <text class="s" x="72" y="480" style="fill:currentColor">or our line recedes.</text>
+    <rect class="note" x="550" y="440" width="270" height="50" rx="4"/>
+    <text class="s" x="562" y="462" style="fill:currentColor">Back to base: resupplied,</text>
+    <text class="s" x="562" y="480" style="fill:currentColor">ready for the next front.</text>
+  </svg>
+  </div>
+  <figcaption>Dashed arrows repeat for the length of the fight. Everything the hero needs to build the arena is in <code>front.open</code>, so both games stay in step without sharing a simulation.</figcaption>
+</figure>
+<h3>Waves, recall and when a front ends</h3>
+<ul>
+  <li><b>Nutrients set the size of the fight.</b> Each front carries a pool of the rival AI's nutrients. The AI spends it on waves, so a bigger pool means more waves, and bigger and stronger ones, the same way more nutrients make the rival stronger in the RTS today. There is no fixed wave count.</li>
+  <li><b>Difficulty comes from the live war, not a fixed number.</b> <code>front.open</code> is built from the RTS state at that front at the moment the hero is sent:
+    <ul>
+      <li>the rival's nutrients and how many veins it has there, and how thick they are, which set the pool and the size and strength of its waves;</li>
+      <li>your own veins at the front, how many and how thick, which set how much ground you hold and so the starting pressure;</li>
+      <li>the nutrients you have available, which set how long you can afford to keep the front open.</li>
+    </ul>
+    A front that has been neglected is a hard fight, and one you have fed well is easier. That is what makes the commander's economy matter to the hero.</li>
+  <li><b>The commander can recall.</b> <code>front.recall</code> orders a retreat. The hero gets a short countdown to disengage, the arena closes, and the front goes back to auto-resolve with whatever damage was dealt.</li>
+  <li><b>Both sides pay while a front is open.</b> The commander's nutrients drain every second the front stays open, like vein upkeep in the RTS. A long fight costs the commander, and a thin economy means thin supplies, upgrades and artillery for the hero, so every player feels it.</li>
+  <li><b>When the nutrients run out, the front dies.</b> If the rival's pool empties, no new waves spawn, and when the last enemy falls the front is won. If the commander's nutrients hit zero first, the front collapses: the hero is pulled out, the front reverts to auto-resolve, and the line recedes. Either way the front sends <code>front.result</code>.</li>
+</ul>
+<h3>Reading the fronts: the pressure meter</h3>
+<p>Every front on the commander's map gets a pressure meter beside its marker, so a failing front is obvious at a glance.</p>
+<ul>
+  <li><b>Who is winning.</b> A bar leans toward your side or the rival's. For a front with a hero it follows the hero's arena. For a front without one it follows the RTS simulation, so every front can be compared on the same scale.</li>
+  <li><b>How long it can last.</b> A thin strip under the bar shows how much of the rival's nutrient pool is left.</li>
+  <li><b>Who is on it.</b> A hero icon appears on the front the hero is deployed to.</li>
+  <li><b>When to act.</b> The marker flashes when pressure crosses a danger threshold, the cue to redeploy the hero there.</li>
+</ul>
+</section>
+
+<section>
+<h2>Many fronts, many heroes</h2>
+<p>Each front is its own instance, so more heroes simply means more instances. Any front without a hero resolves exactly as it does today in the RTS simulation, however many fronts are open. One hero can also move between fronts. The same room can hold several heroes without changing the protocol.</p>
+<figure style="margin-top:14px">
+  <div class="frame">
+  <svg viewBox="0 0 880 330" role="img" aria-label="A map with your mold on the left and a rival on the right, three front markers on the boundary. Fronts 1 and 2 link to live hero arenas, front 3 to automatic resolution.">
+    <rect class="box" x="10" y="10" width="440" height="310" rx="6"/>
+    <path class="ours" d="M12 12 H190 C220 60 175 115 205 160 C235 205 175 262 200 318 H12 Z"/>
+    <path class="rival" d="M448 12 H245 C275 60 230 115 258 160 C286 205 230 262 252 318 H448 Z"/>
+    <text class="t" x="80" y="168">Your mold</text><text class="t" x="330" y="168">Rival mold</text>
+    <circle class="front" cx="226" cy="75" r="16"/><text class="fronttxt" x="226" y="80" text-anchor="middle">F1</text>
+    <circle class="front" cx="232" cy="160" r="16"/><text class="fronttxt" x="232" y="165" text-anchor="middle">F2</text>
+    <circle class="front" cx="226" cy="250" r="16"/><text class="fronttxt" x="226" y="255" text-anchor="middle">F3</text>
+
+    <rect class="hero" x="520" y="20" width="350" height="76" rx="6"/>
+    <text class="t" x="536" y="48">F1 · Hero A · desktop</text><text class="s" x="536" y="70">Live shooter arena, 3 min in</text>
+    <rect class="hero" x="520" y="124" width="350" height="76" rx="6"/>
+    <text class="t" x="536" y="152">F2 · Hero B · phone</text><text class="s" x="536" y="174">Live shooter arena, just opened</text>
+    <rect class="box" x="520" y="228" width="350" height="76" rx="6" stroke-dasharray="6 5"/>
+    <text class="t" x="536" y="256">F3 · no hero</text><text class="s" x="536" y="278">Auto-resolved by the RTS simulation</text>
+
+    <path class="arr" d="M242 70 L518 58"/>
+    <path class="arr" d="M248 160 L518 162"/>
+    <path class="arr d" d="M242 252 L518 266"/>
+  </svg>
+  </div>
+  <figcaption>Fronts 1 and 2 are fought by humans and F3 falls back to the existing simulation. A hero who joins or leaves only changes which fronts take the live path.</figcaption>
+</figure>
+</section>
+
+<section>
+<h2>Why the hero matters a lot</h2>
+<ul>
+  <li><b>The commander dispatches.</b> The commander watches the fronts, spots one that is failing, and sends the hero there with its upgrades to turn it around. Reading the map well is as important as shooting well.</li>
+  <li><b>The hero decides the front.</b> While a hero is fighting a front, winning or losing the arena is the outcome of that front. The RTS simulation does not overrule it. Win and the rival's cells wither. Lose, or get recalled, and the line recedes.</li>
+  <li><b>Death has a cost.</b> A fallen hero respawns after a timer. While down, that front reverts to auto-resolve with a penalty, and the commander pays a small nutrient cost.</li>
+  <li><b>The hero has no wallet.</b> Upgrades, supplies, artillery and unlocks all come from the commander's economy. A starved economy means a thin hero.</li>
+  <li><b>The hero feeds back.</b> Kills pay a nutrient bounty, boss kills grant tech, the hero's view reveals fog around the front, and clearing a front can free a goo pool.</li>
+</ul>
+<div class="note" style="margin-top:12px"><b>Guardrail:</b> solo Slime Mold must stay just as winnable as it is now. The hero adds leverage on top of the baseline. It must never become a requirement to win, or the commander's game stops working alone.</div>
+</section>
+
+<section>
+<h2>Messages</h2>
+<p>All messages share one envelope. Each side validates what it receives and applies it to its own state.</p>
+<pre><code>{ "v": 1, "room": "K7QF", "from": "cmd" | "hero:a", "seq": 482, "type": "artillery", "body": { ... } }</code></pre>
+<div class="tablewrap" style="margin-top:12px"><table>
+<tr><th>Dir</th><th>Type</th><th>Body</th><th>Effect</th></tr>
+<tr><td><span class="tag c">C → H</span></td><td>front.open</td><td>id, seed, nutrient pool, enemy mix</td><td>Hero builds an arena for that front.</td></tr>
+<tr><td><span class="tag c">C → H</span></td><td>front.recall</td><td>id</td><td>Orders a retreat. The hero is pulled out after a short countdown and the front reverts to auto-resolve.</td></tr>
+<tr><td><span class="tag c">C → H</span></td><td>upgrade</td><td>upgrade id, new level</td><td>The commander has bought it with nutrients. The hero's weapon, armor, strength, health, regen or magic changes at once.</td></tr>
+<tr><td><span class="tag c">C → H</span></td><td>supply</td><td>health, mana</td><td>The commander spends nutrients to heal or refill the hero mid-fight.</td></tr>
+<tr><td><span class="tag c">C → H</span></td><td>overview</td><td>fronts (id, pressure, pool %), territory %, nutrient trend</td><td>About once a second. Drives the hero's war-room map. The hero never sends anything back from it.</td></tr>
+<tr><td><span class="tag c">C → H</span></td><td>unlock</td><td>weapon, spell or mold id</td><td>Makes an upgrade or spell available to buy, or unlocks a mold.</td></tr>
+<tr><td><span class="tag c">C → H</span></td><td>marker</td><td>x, y in arena space, label</td><td>Ground marker and compass arrow for the hero.</td></tr>
+<tr><td><span class="tag c">C → H</span></td><td>artillery</td><td>front id, x, y, kind</td><td>The hero's arena applies the strike. Cost and cooldown live on the commander.</td></tr>
+<tr><td><span class="tag h">H → C</span></td><td>request (later)</td><td>kind: supply, upgrade, artillery</td><td>Optional one-tap nudge that lights up the commander's hero panel, for when the players are not in the same room. Not needed at first.</td></tr>
+<tr><td><span class="tag h">H → C</span></td><td>front.progress</td><td>kills, hero HP %, pressure</td><td>Moves the line on the map while the fight runs.</td></tr>
+<tr><td><span class="tag h">H → C</span></td><td>front.result</td><td>won, kills, loot</td><td>Resolves the front.</td></tr>
+<tr><td><span class="tag h">H → C</span></td><td>bounty</td><td>nutrients, rate-limited</td><td>Kills feed the commander's economy.</td></tr>
+<tr><td><span class="tag h">H → C</span></td><td>reveal</td><td>front id, radius</td><td>Clears fog around the front on the RTS map.</td></tr>
+<tr><td><span class="tag h">H → C</span></td><td>hero.down / hero.up</td><td>respawn time</td><td>Front reverts to auto-resolve, then back.</td></tr>
+<tr><td><span class="tag b">Both</span></td><td>hello, ping, leave, snapshot</td><td>version, name, state</td><td>Join, health checks, and rejoin.</td></tr>
+</table></div>
+<h3>Who is the authority</h3>
+<ul>
+  <li>The <b>commander</b> owns the economy, the map and the tech tree. It charges for artillery before it sends the order.</li>
+  <li>The <b>hero</b> owns its arena and its moment-to-moment state. It applies upgrades and supplies when they arrive. It reports outcomes, and the commander applies them to the map.</li>
+  <li>The <b>relay</b> keeps room membership only. Co-op trust is assumed, so there is no anti-cheat.</li>
+</ul>
+</section>
+
+<section>
+<h2>Making it work on phones and desktops</h2>
+<ul>
+  <li><b>Transport is swappable.</b> The games talk to a small <code>Transport</code> interface with the same messages on top. First implementation: the WebSocket relay, which needs one machine on the network running it (a desktop host).</li>
+  <li><b>Phone to phone</b> has no machine to run a relay. A second transport, WebRTC data channels with the offer and answer exchanged by QR code, would work without any server. I haven't tested how reliably phone browsers connect this way on a LAN, so treat it as the item to prototype early.</li>
+  <li><b>Pacing.</b> Linked play locks the RTS at 1x with no pause. The between-wave shop in Slime Mold: Hero goes away when linked. The commander buys upgrades in real time, so nobody's clock stops.</li>
+  <li><b>Slime Mold: Hero is mobile first.</b> Touch is the primary control: a left thumb stick moves, a right thumb stick aims and fires, and a spell button casts. It is built for landscape, and mouse and keyboard remain a supported second way to play. This is already in the game. The war-room map, commander markers and any new hero screens must be designed for a phone screen first.</li>
+  <li><b>One shared package.</b> Message types, the envelope, room codes and both transports live in one small library that both repos import, so the games cannot drift apart.</li>
+</ul>
+</section>
+
+<section>
+<h2>Build order</h2>
+<ol>
+  <li><b>Link package, relay and lobby.</b> Host and join by code or QR, a presence indicator in each game, and a ping marker to prove the plumbing.</li>
+  <li><b>Upgrades and supply.</b> A hero panel on the commander's screen with the same upgrade list as the solo shop in Slime Mold: Hero. The commander pays in nutrients, the hero's game applies the result, and the hero's kills pay nutrients back. The hero has no wallet or shop.</li>
+  <li><b>Fronts.</b> <code>front.open</code>, progress and result, plus a front-instance mode in Slime Mold: Hero and a live pressure meter in the RTS.</li>
+  <li><b>Orders.</b> Map markers, then artillery with cost and cooldown.</li>
+  <li><b>Tech unlocks.</b> Tie RTS tech to hero weapons, spells and the locked molds.</li>
+  <li><b>Hero feedback on the map.</b> Bounty, fog reveal, pool capture, boss tech.</li>
+  <li><b>Phones and more heroes.</b> The WebRTC transport and several simultaneous fronts. Touch controls for the hero are already built.</li>
+</ol>
+</section>
+
+<section>
+<h2>Tuning by playtest</h2>
+<p>The numbers will be settled by playing, so the build has to make that easy.</p>
+<ul>
+  <li><b>One config.</b> Every constant lives in one shared tuning file: the formulas that turn nutrients and veins into wave sizes, starting pressure and drain, how much an upgrade is worth in the arena, the recall countdown, and the danger threshold.</li>
+  <li><b>Adjustable while running.</b> A debug panel changes these values live in both games, so a session can be adjusted without restarting. The values are sent in <code>hello</code> so both games always agree.</li>
+  <li><b>Logged.</b> Each front records its inputs and outcome, so a playtest shows which fronts were too easy or too hard and by how much.</li>
+</ul>
+</section>
+</main>
