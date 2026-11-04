@@ -2,7 +2,8 @@ import './style.css';
 import { Sfx } from './audio';
 import { CHARACTERS } from './characters';
 import { deadTransport, reply, RtcHub, type Invite } from '../link/rtc';
-import { frontProgress, handleEnvelope, heroState, makeLink, relayTransport, type MoldLevels } from './coop';
+import { defaultPeer, frontProgress, handleEnvelope, heroState, joinUrl, makeLink, relayTransport, savePeer, type MoldLevels } from './coop';
+import { qrSvg } from './qr';
 import { Controls } from './input';
 import { Renderer, loadImages } from './render';
 import { Game, type Enemy, type FrontSpec, type FrontState, type GameEvent, type Phase } from './sim';
@@ -85,6 +86,7 @@ async function main(): Promise<void> {
     pairAccept: (text) => void pairAccept(text),
     pairJoin: (text) => void pairJoin(text),
     pairCancel: () => { link.leave(); resetRoute(); showCoop(); },
+    coopPeer: (url) => { savePeer(url); showCoop(); },
     coopBack: () => {
       joinError = null;
       if (!game) ui.showSelect();
@@ -141,13 +143,20 @@ enemies ${game!.enemiesLeft} hp ${Math.round(game!.player.hp)}/${game!.stats.max
   });
   let busy = false;
   let joinError: string | null = null;
-  const coopInfo = (): CoopInfo => ({
+  const coopInfo = (): CoopInfo => {
+    const peer = defaultPeer();
+    const url = link.state === 'hosting' && link.code ? joinUrl(peer, link.code) : null;
+    return {
+    qr: url ? qrSvg(url) : null,
+    peer,
+    localhost: ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname),
     state: link.state,
     code: link.code,
     peers: link.peers.map((p) => ({ role: p.role, name: p.name, online: p.online })),
     error: joinError ?? link.error,
     busy,
-  });
+    };
+  };
   const showCoop = (): void => ui.showCoop(coopInfo());
   const linkText = (): string | null => {
     switch (link.state) {

@@ -6,9 +6,42 @@ import { dlog } from './debug';
 import type { FrontSpec, Game } from './sim';
 import { UPGRADES, emptyLevels, type Levels } from './upgrades';
 
-/** the relay served next to this page (npm run lan) */
+/**
+ * Where the relay is. Normally next to this page (npm run lan), but `?relay=ip:port` points at another machine's, so a
+ * phone that opened this game can join a room the other game is hosting.
+ */
+export function relayHost(): string {
+  const r = new URLSearchParams(location.search).get('relay');
+  return r && /^[\w.-]+(:\d+)?$/.test(r) ? r : location.host;
+}
+
 export const relayTransport = (): Transport =>
-  new WebSocketTransport(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${RELAY_PATH}`);
+  new WebSocketTransport(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${relayHost()}${RELAY_PATH}`);
+
+/** the address of the other game, which a QR code opens with the room to join; guessed from this page's address */
+export function defaultPeer(): string {
+  try {
+    const saved = localStorage.getItem('slime-peer');
+    if (saved) return saved;
+  } catch { /* storage can be unavailable */ }
+  return `${location.protocol}//${location.hostname}:5173/`;
+}
+
+export function savePeer(url: string): void {
+  try { localStorage.setItem('slime-peer', url); } catch { /* storage can be unavailable */ }
+}
+
+/** what the QR code holds: the other game's page, told which room and whose relay to use. Null if the address is not a URL. */
+export function joinUrl(peer: string, code: string, relay = relayHost()): string | null {
+  try {
+    const u = new URL(/^[a-z]+:\/\//i.test(peer) ? peer : `http://${peer}`);
+    u.searchParams.set('join', code);
+    u.searchParams.set('relay', relay);
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
 
 /** which transport the next connection uses: the relay by default, or a paste-paired one while pairing */
 export interface Route { make: () => Transport }

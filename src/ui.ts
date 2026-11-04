@@ -20,6 +20,8 @@ export interface UiHandlers {
   pairAccept(answer: string): void;
   pairJoin(offer: string): void;
   pairCancel(): void;
+  /** the host changed the other game's address that the QR code opens */
+  coopPeer(url: string): void;
 }
 
 /** what the serverless pairing screen shows */
@@ -34,6 +36,12 @@ export interface PairInfo {
 }
 
 export interface CoopInfo {
+  /** QR code (inline SVG) that opens the other game and joins this room; null if there is no usable address */
+  qr?: string | null;
+  /** the other game's address the QR code points at */
+  peer?: string;
+  /** this page was opened as localhost, which another device cannot reach */
+  localhost?: boolean;
   state: 'solo' | 'hosting' | 'linked' | 'dropped';
   code: string | null;
   peers: { role: string; name: string; online: boolean }[];
@@ -97,7 +105,13 @@ export class Ui {
         case 'pair-cancel': this.h.pairCancel(); break;
         case 'pair-copy': {
           const box = this.overlay.querySelector<HTMLTextAreaElement>('#pairOut');
-          if (box) { box.select(); void navigator.clipboard?.writeText(box.value).catch(() => document.execCommand('copy')); }
+          if (box) {
+            box.select();
+            // the clipboard API needs https; a page opened from the LAN over http falls back to the old way
+            const done = navigator.clipboard?.writeText(box.value);
+            if (done) done.catch(() => document.execCommand('copy'));
+            else document.execCommand('copy');
+          }
           break;
         }
       }
@@ -231,8 +245,11 @@ export class Ui {
         <div class="join"><button data-action="pair-host">Host by paste</button><button data-action="pair-join-start">Join by paste</button></div>`;
     } else if (info.state === 'hosting') {
       body = `
-        <p class="sub">Give this code to the commander.</p>
-        <div class="code">${info.code}</div>
+        <p class="sub">Scan this with the other device's camera, or give them the code.</p>
+        ${info.qr ? `<div class="qrbox">${info.qr}</div>` : ''}
+        <div class="code small">${info.code}</div>
+        ${info.localhost ? `<p class="err">This page is open as localhost, so another device cannot reach it. Open it by the network address of this computer instead.</p>` : ''}
+        <label class="peer">Other game's address <input id="peerIn" value="${(info.peer ?? '').replace(/"/g, '&quot;')}" spellcheck="false" autocapitalize="off"></label>
         <p class="sub">Waiting for them to join. You can keep playing.</p>
         <button data-action="coop-leave">Cancel</button>`;
     } else {
@@ -250,6 +267,7 @@ export class Ui {
         <button data-action="coop-back">Back</button>
       </div>`);
     this.coopShown = true;
+    this.overlay.querySelector('#peerIn')?.addEventListener('change', (e) => this.h.coopPeer((e.target as HTMLInputElement).value.trim()));
   }
 
   /** serverless pairing screen. Text boxes keep what is typed, so call it only when the step changes. */
