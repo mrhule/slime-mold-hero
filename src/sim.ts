@@ -40,6 +40,7 @@ export interface Lob { sx: number; sy: number; tx: number; ty: number; t: number
 export interface Blast { x: number; y: number; r: number; t: number; max: number; color: string }
 export interface Particle { x: number; y: number; vx: number; vy: number; life: number; max: number; size: number; color: string }
 export interface Floater { x: number; y: number; text: string; t: number; color: string; big: boolean }
+export interface Marker { x: number; y: number; label: string; t: number; life: number }
 export interface Splat { x: number; y: number; r: number; color: string }
 
 export type GameEvent = 'shoot' | 'hit' | 'kill' | 'hurt' | 'cast' | 'pickup' | 'waveStart' | 'waveClear' | 'dead' | 'boss' | 'buy' | 'enemyShoot';
@@ -65,6 +66,8 @@ export class Game {
   particles: Particle[] = [];
   floaters: Floater[] = [];
   obstacles: Obstacle[] = [];
+  /** spots the commander has pointed out */
+  markers: Marker[] = [];
   /** drained by the renderer each frame */
   splats: Splat[] = [];
   phase: Phase = 'shop';
@@ -105,6 +108,17 @@ export class Game {
       if (this.obstacles.some((o) => Math.hypot(o.x - x, o.y - y) < o.r + r + 70)) continue;
       this.obstacles.push({ x, y, r, sprite: rock.key, scale });
     }
+  }
+
+  /** a commander marker in arena coordinates, kept inside the dish */
+  addMarker(x: number, y: number, label = ''): void {
+    const dx = x - CENTER.x;
+    const dy = y - CENTER.y;
+    const d = Math.hypot(dx, dy);
+    const max = ARENA_R - 80;
+    if (d > max) { x = CENTER.x + (dx / d) * max; y = CENTER.y + (dy / d) * max; }
+    this.markers.push({ x, y, label: label.slice(0, 16), t: 0, life: 25 });
+    if (this.markers.length > 3) this.markers.shift();
   }
 
   get enemiesLeft(): number {
@@ -598,6 +612,8 @@ export class Game {
     this.particles = this.particles.filter((pt) => pt.life > 0);
     for (const f of this.floaters) { f.t += dt; f.y -= 40 * dt; }
     this.floaters = this.floaters.filter((f) => f.t < 0.8).slice(-60);
+    for (const m of this.markers) m.t += dt;
+    this.markers = this.markers.filter((m) => m.t < m.life);
     for (const b of this.blasts) b.t += dt;
     this.blasts = this.blasts.filter((b) => b.t < b.max);
   }

@@ -1,10 +1,12 @@
 import './style.css';
 import { Sfx } from './audio';
 import { CHARACTERS } from './characters';
+import type { Messages } from '../link/protocol';
+import { makeLink } from './coop';
 import { Controls } from './input';
 import { Renderer, loadImages } from './render';
 import { Game, type Enemy, type GameEvent, type Phase } from './sim';
-import { Ui, saveBest } from './ui';
+import { Ui, saveBest, type CoopInfo } from './ui';
 
 async function main(): Promise<void> {
   const canvas = document.getElementById('game') as HTMLCanvasElement;
@@ -52,14 +54,69 @@ async function main(): Promise<void> {
     }
   };
 
-  const ui = new Ui({
+  const ui: Ui = new Ui({
     play: (id) => { sfx.unlock(); start(id); },
     buy: (id) => { if (game?.buy(id)) ui.showShop(game); },
     nextWave: () => { if (game?.phase === 'shop') game.startWave(); },
     retry: () => start(charId),
     menu: () => { game = null; ui.showHud(false); ui.showSelect(); },
     resume: () => setPaused(false),
+    coop: () => showCoop(),
+    coopHost: () => {
+      busy = true;
+      showCoop();
+      link.host().catch(() => {}).finally(() => { busy = false; showCoop(); });
+    },
+    coopJoin: (code) => {
+      if (code.length < 4) { joinError = 'Enter the 4 letter code'; return showCoop(); }
+      busy = true;
+      joinError = null;
+      showCoop();
+      link.join(code).catch(() => {}).finally(() => { busy = false; showCoop(); });
+    },
+    coopLeave: () => { link.leave(); showCoop(); },
+    coopBack: () => {
+      joinError = null;
+      if (!game) ui.showSelect();
+      else if (paused) ui.showPause();
+      else ui.hide();
+    },
   });
+
+  // ---- co-op link: this game plays the hero. It works alone, and the link only adds things.
+  const link = makeLink();
+  let busy = false;
+  let joinError: string | null = null;
+  const coopInfo = (): CoopInfo => ({
+    state: link.state,
+    code: link.code,
+    peers: link.peers.map((p) => ({ role: p.role, name: p.name, online: p.online })),
+    error: joinError ?? link.error,
+    busy,
+  });
+  const showCoop = (): void => ui.showCoop(coopInfo());
+  const linkText = (): string | null => {
+    switch (link.state) {
+      case 'hosting': return `Room ${link.code}`;
+      case 'linked': return 'Linked to commander';
+      case 'dropped': return 'Reconnecting…';
+      default: return null;
+    }
+  };
+  link.onState(() => {
+    ui.setLink(linkText());
+    if (ui.coopShown) showCoop();
+  });
+  link.onMessage((e) => {
+    if (e.type === 'marker') {
+      const b = e.body as Partial<Messages['marker']> | null;
+      if (game && b && Number.isFinite(b.x) && Number.isFinite(b.y)) game.addMarker(b.x!, b.y!, typeof b.label === 'string' ? b.label : '');
+    } else if (e.type === 'ping') {
+      const b = e.body as Partial<Messages['ping']> | null;
+      link.send('pong', { t: Number(b?.t) || 0 });
+    }
+  });
+  window.addEventListener('beforeunload', () => link.leave());
 
   const controls = new Controls(
     canvas,
@@ -84,6 +141,13 @@ async function main(): Promise<void> {
 
   ui.showSelect();
   ui.showHud(false);
+
+  // a commander (or a QR code) can open this page with ?join=CODE to link straight away
+  const joinCode = new URLSearchParams(location.search).get('join');
+  if (joinCode) {
+    busy = true;
+    link.join(joinCode).catch(() => { joinError = link.error; showCoop(); }).finally(() => { busy = false; });
+  }
 
   const nearest = (g: Game, range: number): Enemy | null => {
     let best: Enemy | null = null;
@@ -143,6 +207,7 @@ async function main(): Promise<void> {
   (window as unknown as { __game: () => Game | null }).__game = () => game;
   (window as unknown as { __renderer: Renderer }).__renderer = renderer;
   (window as unknown as { __controls: Controls }).__controls = controls;
+  (window as unknown as { __link: typeof link }).__link = link;
 }
 
 main().catch((err) => {

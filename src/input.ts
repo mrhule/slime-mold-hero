@@ -30,7 +30,7 @@ export class Controls {
 
   constructor(canvas: HTMLCanvasElement, private onKey: (code: string) => void, private onMode: (touch: boolean) => void) {
     window.addEventListener('keydown', (e) => {
-      if (e.repeat) return;
+      if (e.repeat || (e.target as HTMLElement | null)?.tagName === 'INPUT') return;
       this.keys.add(e.code);
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
       this.onKey(e.code);

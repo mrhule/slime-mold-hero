@@ -310,6 +310,7 @@ export class Renderer {
     const vis = (x: number, y: number) => x > vx0 && x < vx1 && y > vy0 && y < vy1;
 
     for (const pool of game.pools) this.pool(pool, game.time);
+    for (const m of game.markers) this.marker(m, game.time);
     for (const l of game.lobs) this.lob(l, game);
     for (const k2 of game.pickups) if (vis(k2.x, k2.y)) this.pickup(k2, game.time);
     const sorted = [...game.enemies].sort((a, b) => a.y - b.y);
@@ -353,9 +354,66 @@ export class Renderer {
     ctx.globalAlpha = 0.4;
     ctx.drawImage(v, 0, 0, w, h);
     ctx.globalAlpha = 1;
+    this.markerArrows(game);
     if (game.phase === 'wave' || game.phase === 'clear') {
       if (this.touchMode) this.drawSticks();
       else this.crosshair();
+    }
+  }
+
+  /** a pulsing ground ring with a label where the commander pointed */
+  private marker(m: Game['markers'][number], t: number): void {
+    const { ctx } = this;
+    const fade = Math.min(1, (m.life - m.t) / 2, m.t / 0.2 + 0.2);
+    const r = 34 + Math.sin(t * 5) * 5;
+    ctx.globalAlpha = 0.9 * fade;
+    for (const [col, lw] of [[INK, 9], ['#ffd23f', 5]] as const) {
+      ctx.strokeStyle = col;
+      ctx.lineWidth = lw;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, r, 0, TAU);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#ffd23f';
+    ctx.font = "26px Impact, 'Arial Black', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = INK;
+    ctx.strokeText('!', m.x, m.y + 9);
+    ctx.fillText('!', m.x, m.y + 9);
+    if (m.label) {
+      ctx.font = "15px Impact, 'Arial Black', sans-serif";
+      ctx.strokeText(m.label, m.x, m.y - r - 8);
+      ctx.fillText(m.label, m.x, m.y - r - 8);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /** an arrow at the screen edge for a marker that is off screen */
+  private markerArrows(game: Game): void {
+    const { ctx, w, h } = this;
+    for (const m of game.markers) {
+      const sx = (m.x - this.cam.x) * this.scale + w / 2;
+      const sy = (m.y - this.cam.y) * this.scale + h / 2;
+      const pad = 36;
+      if (sx > pad && sx < w - pad && sy > pad && sy < h - pad) continue;
+      const a = Math.atan2(sy - h / 2, sx - w / 2);
+      const k = Math.min((w / 2 - pad) / Math.abs(Math.cos(a) || 1e-6), (h / 2 - pad) / Math.abs(Math.sin(a) || 1e-6));
+      const ax = w / 2 + Math.cos(a) * k;
+      const ay = h / 2 + Math.sin(a) * k;
+      ctx.save();
+      ctx.translate(ax, ay);
+      ctx.rotate(a);
+      ctx.beginPath();
+      ctx.moveTo(16, 0);
+      ctx.lineTo(-10, -12);
+      ctx.lineTo(-4, 0);
+      ctx.lineTo(-10, 12);
+      ctx.closePath();
+      ctx.fillStyle = '#ffd23f';
+      ctx.fill();
+      ink(ctx, 3);
+      ctx.restore();
     }
   }
 

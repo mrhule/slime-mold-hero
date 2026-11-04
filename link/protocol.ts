@@ -1,0 +1,98 @@
+/**
+ * Slime Link wire protocol, shared by the relay and every game.
+ * Games never share state. They send small messages and each side decides what a message means
+ * (see docs/co-op-design.html).
+ */
+export const PROTOCOL_VERSION = 1;
+
+/** how long a dropped peer keeps its seat before it is removed (ms) */
+export const GRACE_MS = 60_000;
+
+export type Role = 'cmd' | 'hero';
+
+export interface PeerInfo {
+  id: string;
+  role: Role;
+  name: string;
+  /** false while the peer's connection is down but still inside the grace period */
+  online: boolean;
+}
+
+/** what every game receives: the relay stamps `from`, `role` and `room` so nobody can pose as someone else */
+export interface Envelope<T = unknown> {
+  v: number;
+  room: string;
+  from: string;
+  role: Role;
+  seq: number;
+  type: string;
+  body: T;
+}
+
+export type ClientMsg =
+  | { k: 'host'; role: Role; name: string }
+  | { k: 'join'; code: string; role: Role; name: string; peer?: string }
+  | { k: 'env'; type: string; body: unknown; seq: number }
+  | { k: 'leave' }
+  | { k: 'ping' };
+
+export type ServerMsg =
+  | { k: 'hosted'; code: string; me: PeerInfo }
+  | { k: 'joined'; code: string; me: PeerInfo; peers: PeerInfo[] }
+  | { k: 'peer'; ev: 'join' | 'drop' | 'rejoin' | 'leave'; peer: PeerInfo }
+  | { k: 'env'; env: Envelope }
+  | { k: 'error'; reason: 'no-room' | 'full' | 'busy' | 'bad-message' }
+  | { k: 'pong' };
+
+/** message bodies the games agree on so far; more arrive as the co-op features are built */
+export interface Messages {
+  /** commander asks the hero to look at a spot, in arena coordinates */
+  marker: { x: number; y: number; label?: string };
+  /** round trip check */
+  ping: { t: number };
+  pong: { t: number };
+}
+
+const CODE_LETTERS = 'ABCDEFGHJKMNPQRSTUVWXYZ';
+
+/** four letters, no I, L or O so a code read aloud is not mistaken for a number */
+export function makeRoomCode(rng: () => number = Math.random): string {
+  let s = '';
+  for (let i = 0; i < 4; i++) s += CODE_LETTERS[Math.floor(rng() * CODE_LETTERS.length)];
+  return s;
+}
+
+export function normalizeCode(code: string): string {
+  return code.trim().toUpperCase();
+}
+
+const isRole = (r: unknown): r is Role => r === 'cmd' || r === 'hero';
+const str = (s: unknown, max: number): s is string => typeof s === 'string' && s.length <= max;
+
+/** parse and validate one text frame from a client; null means reject it */
+export function parseClientMsg(raw: string): ClientMsg | null {
+  if (raw.length > 16_384) return null;
+  let m: Record<string, unknown>;
+  try {
+    m = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!m || typeof m !== 'object') return null;
+  switch (m.k) {
+    case 'host':
+      return isRole(m.role) && str(m.name, 24) ? { k: 'host', role: m.role, name: m.name } : null;
+    case 'join':
+      return str(m.code, 8) && isRole(m.role) && str(m.name, 24) && (m.peer === undefined || str(m.peer, 40))
+        ? { k: 'join', code: normalizeCode(m.code), role: m.role, name: m.name, peer: m.peer }
+        : null;
+    case 'env':
+      return str(m.type, 40) && typeof m.seq === 'number' ? { k: 'env', type: m.type, body: m.body, seq: m.seq } : null;
+    case 'leave':
+      return { k: 'leave' };
+    case 'ping':
+      return { k: 'ping' };
+    default:
+      return null;
+  }
+}
