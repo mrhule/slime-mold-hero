@@ -175,3 +175,42 @@ body.touch .pill { top: calc(max(12px, env(safe-area-inset-top)) + 54px); font-s
 .coop .peers { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; font-size: 18px; }
 .coop .err { margin: 0; color: #ff8a7a; font-weight: 600; }
 @media (max-height: 520px) { .coop .code { font-size: 44px; } .coop .sub { display: block; font-size: 13px; } }
+
+/* medals: upgrade levels worn by the hero */
+.medals { position: absolute; top: calc(max(12px, env(safe-area-inset-top)) + 98px); left: max(16px, env(safe-area-inset-left)); display: flex; flex-wrap: wrap; gap: 4px; max-width: min(320px, 40vw); }
+.medal { display: inline-flex; align-items: center; gap: 2px; font: 13px var(--font); color: var(--gold); background: #1d211a; border: 2px solid var(--ink); box-shadow: 2px 2px 0 var(--ink); padding: 0 5px; }
+.medal b { font-weight: normal; }
+body.touch .medals { top: calc(max(12px, env(safe-area-inset-top)) + 80px); }
+body.touch .medal { font-size: 11px; padding: 0 3px; }
+body.linked #gold { display: none; }
+body:not(.linked) .pill + .medals { top: calc(max(12px, env(safe-area-inset-top)) + 70px); }
+
+/* war room map and playtest panel */
+#mapBtn { position: fixed; z-index: 30; top: calc(max(12px, env(safe-area-inset-top)) + 64px); right: max(16px, env(safe-area-inset-right)); width: 46px; height: 46px; padding: 0; font-size: 24px; display: none; }
+body.linked #mapBtn:not([hidden]) { display: block; }
+#warroom { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; align-content: center; background: rgba(8, 10, 7, 0.78); text-align: center; color: #cfd8c4; font: 14px var(--font); }
+#warroom[hidden] { display: none; }
+#warroom svg { width: min(94vw, 150vh, 760px); height: auto; max-height: 82vh; border: 4px solid var(--ink); box-shadow: 6px 6px 0 var(--ink); }
+#warroom p { margin: 8px 0 0; opacity: 0.7; }
+#warroom .table { fill: #1a2418; }
+#warroom .grid path { stroke: #2b3a28; stroke-width: 1; }
+#warroom .vein { fill: none; stroke: #b6a24a; opacity: 0.8; stroke-linecap: round; }
+#warroom .node { stroke: var(--ink); stroke-width: 4; }
+#warroom .pool { stroke: #e8f2d8; stroke-width: 4; }
+#warroom .home { fill: #3e6a2f; stroke: var(--ink); stroke-width: 4; }
+#warroom text { font-family: Impact, 'Arial Black', sans-serif; text-anchor: middle; fill: #fff; paint-order: stroke; stroke: var(--ink); stroke-width: 3px; }
+#warroom .pct { font-size: 17px; }
+#warroom .hero { font-size: 14px; fill: var(--gold); }
+#warroom .lbl { font-size: 13px; }
+#warroom .stat { text-anchor: start; font-size: 13px; fill: #cfd8c4; }
+#warroom .danger .node { animation: warn 0.8s ease-in-out infinite alternate; }
+@keyframes warn { to { stroke: #ffd23f; } }
+
+#debugPanel { position: fixed; z-index: 60; top: 8px; left: 8px; width: 280px; max-height: calc(100vh - 16px); overflow: auto; background: rgba(10, 12, 8, 0.92); color: #cfd8c4; border: 3px solid var(--ink); font: 12px/1.35 ui-monospace, Consolas, monospace; padding: 8px; }
+#debugPanel[hidden] { display: none; }
+#debugPanel .dbTop { display: flex; gap: 4px; align-items: center; }
+#debugPanel .dbTop b { flex: 1; }
+#debugPanel button { font: 12px var(--font); padding: 2px 8px; box-shadow: 2px 2px 0 var(--ink); }
+#debugPanel label { display: flex; justify-content: space-between; gap: 6px; margin: 2px 0; }
+#debugPanel input { width: 70px; background: #11140e; color: var(--gold); border: 2px solid var(--ink); font: inherit; }
+#debugPanel pre { margin: 6px 0; white-space: pre-wrap; color: #8fd264; }

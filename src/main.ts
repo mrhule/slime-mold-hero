@@ -1,11 +1,12 @@
 import './style.css';
 import { Sfx } from './audio';
 import { CHARACTERS } from './characters';
-import type { Messages } from '../link/protocol';
-import { makeLink } from './coop';
+import { frontProgress, handleEnvelope, heroState, makeLink, type MoldLevels } from './coop';
 import { Controls } from './input';
 import { Renderer, loadImages } from './render';
-import { Game, type Enemy, type GameEvent, type Phase } from './sim';
+import { Game, type Enemy, type FrontSpec, type FrontState, type GameEvent, type Phase } from './sim';
+import { dlog, setupDebug } from './debug';
+import { WarRoom } from './warroom';
 import { Ui, saveBest, type CoopInfo } from './ui';
 
 async function main(): Promise<void> {
@@ -29,10 +30,12 @@ async function main(): Promise<void> {
     if (on) { controls.release(); ui.showPause(); } else ui.hide();
   };
 
-  const start = (id: string) => {
+  const start = (id: string, front?: FrontSpec) => {
     charId = id;
     const ch = CHARACTERS.find((c) => c.id === id) ?? CHARACTERS[0];
-    game = new Game(ch, Math.floor(Math.random() * 1e9));
+    game = new Game(ch, front?.seed ?? Math.floor(Math.random() * 1e9), isLinked() ? molds[id] : undefined);
+    game.linked = isLinked();
+    if (front) game.openFront(front);
     game.onEvent = onEvent;
     renderer.reset(game);
     paused = false;
@@ -48,6 +51,7 @@ async function main(): Promise<void> {
     sfx.play(e);
     if (!game) return;
     if (e === 'waveStart') {
+      dlog('wave', { n: game.wave, front: game.front?.spec.id, pool: game.front?.pool });
       renderer.fadeDecals();
       const boss = game.wave % 5 === 0;
       ui.banner(boss ? `WAVE ${game.wave} · BOSS!` : `WAVE ${game.wave}`, boss);
@@ -85,6 +89,13 @@ async function main(): Promise<void> {
 
   // ---- co-op link: this game plays the hero. It works alone, and the link only adds things.
   const link = makeLink();
+  const warroom = new WarRoom();
+  setupDebug(() => {
+    const f = game?.front;
+    return f ? `front ${f.spec.id} wave ${game!.wave} pool ${f.pool}/${f.spec.pool}
+pressure ${game!.pressure.toFixed(2)} bounty ${f.bounty} bosses ${f.bosses}
+enemies ${game!.enemiesLeft} hp ${Math.round(game!.player.hp)}/${game!.stats.maxHp}` : `link ${link.state}${game ? ' · wave ' + game.wave : ''}`;
+  });
   let busy = false;
   let joinError: string | null = null;
   const coopInfo = (): CoopInfo => ({
@@ -104,18 +115,42 @@ async function main(): Promise<void> {
     }
   };
   link.onState(() => {
+    dlog('link', link.state);
+    if (link.state === 'solo') warroom.clear();
+    syncLinked();
     ui.setLink(linkText());
     if (ui.coopShown) showCoop();
   });
-  link.onMessage((e) => {
-    if (e.type === 'marker') {
-      const b = e.body as Partial<Messages['marker']> | null;
-      if (game && b && Number.isFinite(b.x) && Number.isFinite(b.y)) game.addMarker(b.x!, b.y!, typeof b.label === 'string' ? b.label : '');
-    } else if (e.type === 'ping') {
-      const b = e.body as Partial<Messages['ping']> | null;
-      link.send('pong', { t: Number(b?.t) || 0 });
-    }
-  });
+  // while linked the commander buys upgrades and supplies the hero: no shop, no goo
+  const molds: MoldLevels = {};
+  const isLinked = () => link.state === 'linked' || link.state === 'dropped';
+  const report = () => {
+    if (!game || link.state !== 'linked') return;
+    link.send('hero.state', heroState(game));
+    const p = frontProgress(game);
+    if (p) link.send('front.progress', p);
+  };
+  // a front is decided once: tell the commander, and send the hero back to the title when it was won or recalled
+  let settled: FrontState | null = null;
+  const settleFront = () => {
+    const f = game?.front;
+    if (!game || !f?.result || settled === f) return;
+    settled = f;
+    if (link.state === 'linked') link.send('front.result', { id: f.spec.id, outcome: f.result, kills: game.kills, loot: game.loot });
+    dlog('front.result', { id: f.spec.id, outcome: f.result, kills: game.kills, wave: game.wave, loot: game.loot });
+    if (f.result === 'lost') return;
+    ui.banner(f.result === 'won' ? 'FRONT HELD' : 'RECALLED', f.result === 'won');
+    setTimeout(() => { if (game?.front === f) { game = null; ui.showHud(false); ui.showSelect(); } }, 2500);
+  };
+  const syncLinked = () => {
+    document.body.classList.toggle('linked', isLinked());
+    if (game) game.linked = isLinked();
+    if (link.state === 'solo') for (const k of Object.keys(molds)) delete molds[k];
+    if (link.state === 'linked' && game) { molds[game.ch.id] = { ...game.levels }; report(); }
+  };
+  link.onMessage((e) => { if (handleEnvelope(e, { game, molds, openFront: (spec) => { dlog('front.open', spec); start(charId || CHARACTERS[0].id, spec); },
+    overview: (o) => warroom.update(o), send: (t, b) => link.send(t, b) })) report(); });
+  setInterval(() => { settleFront(); report(); }, 1000);
   window.addEventListener('beforeunload', () => link.leave());
 
   const controls = new Controls(
@@ -193,6 +228,7 @@ async function main(): Promise<void> {
           if (deadTimer <= 0 && game.phase === 'dead') ui.showDead(game);
         }
       }
+      settleFront();
       renderer.draw(game);
       ui.hud(game);
     } else {

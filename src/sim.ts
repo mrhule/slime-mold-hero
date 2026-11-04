@@ -1,6 +1,7 @@
 import type { CharacterDef } from './characters';
-import { BOSS_SPRITES, ENEMIES, planWave, type EnemyKind, type Spawn } from './enemies';
+import { BOSS_SPRITES, ENEMIES, planWave, spawnCost, type EnemyKind, type Spawn } from './enemies';
 import { mulberry32 } from './rng';
+import { TUNING } from './tuning';
 import { UPGRADES, derive, emptyLevels, upgradeCost, type Derived, type Levels } from './upgrades';
 
 /** The dish: a circle of radius ARENA_R centred at (ARENA_R, ARENA_R). */
@@ -51,6 +52,40 @@ const ROCKS = [
 ];
 export const ROCK_SIZES: Record<string, { w: number; h: number }> = Object.fromEntries(ROCKS.map((r) => [r.key, { w: r.w, h: r.h }]));
 
+/** what the commander sends to open a front: the rival's nutrient pool sizes the fight */
+export interface FrontSpec {
+  id: string;
+  seed: number;
+  /** the rival's nutrients at this front; each enemy spawned spends some */
+  pool: number;
+  /** how strong the rival's waves start (1 is the first wave of a solo game) */
+  tier: number;
+  /** 0 (our line is solid) to 1 (about to break) when the hero arrives */
+  pressure: number;
+}
+
+export type FrontOutcome = 'won' | 'lost' | 'recalled';
+
+export interface FrontState {
+  spec: FrontSpec;
+  /** rival nutrients not yet spent on enemies */
+  pool: number;
+  /** set once, when the front is decided */
+  result: FrontOutcome | null;
+  /** seconds left to disengage after a recall; 0 when not recalled */
+  recallT: number;
+  /** nutrients the hero's kills have earned the commander so far */
+  bounty: number;
+  /** bosses killed, each one a tech point for the commander */
+  bosses: number;
+}
+
+/** a commander artillery strike: a warning ring, then a blast */
+export interface Strike { x: number; y: number; r: number; t: number; delay: number; damage: number }
+
+/** what the commander keeps from a front */
+export interface FrontLoot { nutrients: number; tech: number; goo: number }
+
 export class Game {
   readonly ch: CharacterDef;
   readonly rng: () => number;
@@ -68,6 +103,8 @@ export class Game {
   obstacles: Obstacle[] = [];
   /** spots the commander has pointed out */
   markers: Marker[] = [];
+  /** artillery the commander has called in */
+  strikes: Strike[] = [];
   /** drained by the renderer each frame */
   splats: Splat[] = [];
   phase: Phase = 'shop';
@@ -78,15 +115,23 @@ export class Game {
   shake = 0;
   clearT = 0;
   lastClearBonus = 0;
+  /**
+   * Linked to a commander: no shop and no goo, because the commander buys upgrades and supplies the hero.
+   * Waves run back to back.
+   */
+  linked = false;
+  /** set when the commander deployed the hero to a front; the front, not the wave count, decides how long it lasts */
+  front: FrontState | null = null;
   onEvent: (e: GameEvent) => void = () => {};
   private queue: Spawn[] = [];
   private waveTime = 0;
   private nextId = 1;
   private bossIndex = 0;
 
-  constructor(ch: CharacterDef, seed = 1) {
+  constructor(ch: CharacterDef, seed = 1, levels?: Levels) {
     this.ch = ch;
     this.rng = mulberry32(seed);
+    if (levels) this.levels = { ...emptyLevels(), ...levels };
     this.stats = derive(ch, this.levels);
     this.player = {
       x: CENTER.x, y: CENTER.y, vx: 0, vy: 0, r: ch.radius, hp: this.stats.maxHp, mana: this.stats.maxMana, gold: 0, aim: 0,
@@ -121,6 +166,33 @@ export class Game {
     if (this.markers.length > 3) this.markers.shift();
   }
 
+  /** artillery from the commander, in arena coordinates; lands after a warning `delay` */
+  addStrike(x: number, y: number): void {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || this.strikes.length >= TUNING.strike.max || this.phase === 'dead') return;
+    const dx = x - CENTER.x;
+    const dy = y - CENTER.y;
+    const d = Math.hypot(dx, dy);
+    const max = ARENA_R - 40;
+    if (d > max) { x = CENTER.x + (dx / d) * max; y = CENTER.y + (dy / d) * max; }
+    const s = TUNING.strike;
+    this.strikes.push({ x, y, r: s.radius, t: 0, delay: s.delay, damage: s.damage });
+  }
+
+  private updateStrikes(dt: number): void {
+    for (const k of this.strikes) {
+      k.t += dt;
+      if (k.t >= k.delay) this.explode(k.x, k.y, k.r, k.damage, 700, false, '#ff9a3c');
+    }
+    this.strikes = this.strikes.filter((k) => k.t < k.delay);
+  }
+
+  /** what the commander keeps from this front so far */
+  get loot(): FrontLoot {
+    const f = this.front;
+    if (!f) return { nutrients: 0, tech: 0, goo: 0 };
+    return { nutrients: f.bounty, tech: f.bosses * TUNING.feedback.techPerBoss, goo: f.result === 'won' ? TUNING.feedback.gooOnWin : 0 };
+  }
+
   get enemiesLeft(): number {
     return this.enemies.length + this.queue.length;
   }
@@ -134,9 +206,56 @@ export class Game {
     this.wave++;
     this.phase = 'wave';
     this.waveTime = 0;
-    this.queue = planWave(this.wave, this.rng);
+    this.queue = planWave(this.front ? this.front.spec.tier + this.wave - 1 : this.wave, this.rng);
+    if (this.front) this.queue = this.spendPool(this.queue, this.front);
     this.player.hp = Math.min(this.stats.maxHp, this.player.hp);
     this.onEvent('waveStart');
+  }
+
+  /** open this game as a front: the linked, endless waves become a fight over a nutrient pool */
+  openFront(spec: FrontSpec): void {
+    this.linked = true;
+    this.front = { spec, pool: Math.max(0, spec.pool), result: null, recallT: 0, bounty: 0, bosses: 0 };
+  }
+
+  /** the rival spends its pool on the wave; whatever does not fit is never sent */
+  private spendPool(plan: Spawn[], f: FrontState): Spawn[] {
+    const out: Spawn[] = [];
+    for (const s of plan) {
+      const c = spawnCost(s.kind);
+      if (c > f.pool) continue;
+      f.pool -= c;
+      out.push(s);
+    }
+    if (!out.length) f.pool = 0; // too little left to send anything: the rival is spent
+    return out;
+  }
+
+  /** the commander orders a retreat; the hero has a few seconds to disengage */
+  recall(): void {
+    const f = this.front;
+    if (!f || f.result || f.recallT > 0) return;
+    f.recallT = TUNING.front.recallSeconds;
+  }
+
+  /** who is winning this front, 0 (our side) to 1 (the rival's): the commander's pressure meter */
+  get pressure(): number {
+    const f = this.front;
+    if (!f) return 0;
+    if (f.result === 'won') return 0;
+    const left = f.spec.pool > 0 ? f.pool / f.spec.pool : 0;
+    const hurt = 1 - Math.max(0, this.player.hp) / this.stats.maxHp;
+    return Math.max(0, Math.min(1, f.spec.pressure * left + hurt * TUNING.front.hurtWeight));
+  }
+
+  private tickFront(dt: number): void {
+    const f = this.front;
+    if (!f || f.result) return;
+    if (this.phase === 'dead') f.result = 'lost';
+    else if (f.recallT > 0) {
+      f.recallT -= dt;
+      if (f.recallT <= 0) { f.recallT = 0; f.result = 'recalled'; }
+    }
   }
 
   nextCost(id: string): number | null {
@@ -160,11 +279,43 @@ export class Game {
     return true;
   }
 
+  /** the commander bought an upgrade: set that level (never above the cap) and refresh stats */
+  setLevel(id: string, level: number): boolean {
+    const def = UPGRADES.find((u) => u.id === id);
+    if (!def || !Number.isFinite(level)) return false;
+    const next = Math.max(0, Math.min(def.max, Math.floor(level)));
+    const before = this.stats;
+    this.levels[id] = next;
+    this.stats = derive(this.ch, this.levels);
+    if (id === 'vitality') this.player.hp = Math.min(this.stats.maxHp, this.player.hp + Math.max(0, this.stats.maxHp - before.maxHp));
+    if (id === 'mana') this.player.mana = Math.min(this.stats.maxMana, this.player.mana + Math.max(0, this.stats.maxMana - before.maxMana));
+    this.onEvent('buy');
+    return true;
+  }
+
+  /** the commander spent nutrients to restore a fraction of health and mana */
+  supply(health: number, mana: number): void {
+    const p = this.player;
+    if (this.phase === 'dead') return;
+    const h = Math.max(0, Math.min(1, health || 0));
+    const m = Math.max(0, Math.min(1, mana || 0));
+    if (h > 0) {
+      p.hp = Math.min(this.stats.maxHp, p.hp + this.stats.maxHp * h);
+      this.floaters.push({ x: p.x, y: p.y - p.r - 10, text: '+HP', t: 0, color: '#6fdc4f', big: true });
+    }
+    if (m > 0) {
+      p.mana = Math.min(this.stats.maxMana, p.mana + this.stats.maxMana * m);
+      this.floaters.push({ x: p.x, y: p.y - p.r - 28, text: '+MANA', t: 0, color: '#6ec6ff', big: true });
+    }
+    if (h > 0 || m > 0) this.onEvent('pickup');
+  }
+
   update(dt: number, input: Input): void {
     this.time += dt;
     this.shake = Math.max(0, this.shake - dt * 30);
     this.updateFx(dt);
-    if (this.phase === 'dead' || this.phase === 'shop') return;
+    this.tickFront(dt);
+    if (this.phase === 'dead' || this.phase === 'shop' || this.front?.result) return;
 
     this.waveTime += dt;
     this.updatePlayer(dt, input);
@@ -173,13 +324,18 @@ export class Game {
     this.updateBullets(dt);
     this.updateLobs(dt);
     this.updatePools(dt);
+    this.updateStrikes(dt);
     this.updatePickups(dt);
     this.enemies = this.enemies.filter((e) => e.hp > 0);
 
     if (this.phase === 'wave' && this.queue.length === 0 && this.enemies.length === 0) this.endWave();
     else if (this.phase === 'clear') {
       this.clearT -= dt;
-      if (this.clearT <= 0) this.phase = 'shop';
+      if (this.clearT <= 0) {
+        this.phase = 'shop';
+        if (this.front && this.front.pool < 1) this.front.result = 'won'; // the rival has nothing left to send
+        else if (this.linked) this.startWave();
+      }
     }
   }
 
@@ -187,7 +343,7 @@ export class Game {
     this.phase = 'clear';
     this.clearT = 1.6;
     this.bullets = this.bullets.filter((b) => b.friendly);
-    this.lastClearBonus = 10 + 5 * this.wave;
+    this.lastClearBonus = this.linked ? 0 : 10 + 5 * this.wave;
     this.player.gold += this.lastClearBonus;
     this.goldEarned += this.lastClearBonus;
     this.player.hp = Math.min(this.stats.maxHp, this.player.hp + this.stats.maxHp * 0.25);
@@ -230,13 +386,21 @@ export class Game {
     const w = this.stats.weapon;
     p.fireCd = 1 / w.rate;
     p.recoil = 4;
+    // an enemy already in the muzzle zone would be behind the bullet's first step, so start the shot inside the hero
+    const close = this.enemies.some((e) => {
+      if (e.hp <= 0 || e.spawnT > 0) return false;
+      const dx = e.x - p.x;
+      const dy = e.y - p.y;
+      return Math.hypot(dx, dy) < p.r + 8 + e.r + w.size && dx * Math.cos(p.aim) + dy * Math.sin(p.aim) > -e.r;
+    });
+    const lead = close ? 0 : p.r + 8;
     const fan = w.pellets > 1 ? Math.max(w.spread, 0.05 * (w.pellets - 1)) : 0;
     for (let i = 0; i < w.pellets; i++) {
       const off = w.pellets > 1 ? -fan + (2 * fan * i) / (w.pellets - 1) : 0;
       const a = p.aim + off + (this.rng() - 0.5) * w.spread;
       const speed = w.speed * (0.94 + this.rng() * 0.12);
-      const sx = p.x + Math.cos(p.aim) * (p.r + 8);
-      const sy = p.y + Math.sin(p.aim) * (p.r + 8);
+      const sx = p.x + Math.cos(p.aim) * lead;
+      const sy = p.y + Math.sin(p.aim) * lead;
       this.bullets.push({
         x: sx, y: sy, px: sx, py: sy, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, r: w.size,
         damage: w.damage * this.stats.strength, life: w.range / w.speed, pierce: w.pierce, hit: [], friendly: true,
@@ -266,8 +430,8 @@ export class Game {
   }
 
   /** Area damage with knockback; `pool` leaves a slowing acid puddle behind. */
-  private explode(x: number, y: number, radius: number, damage: number, knock: number, pool: boolean): void {
-    const color = this.ch.colors.light;
+  private explode(x: number, y: number, radius: number, damage: number, knock: number, pool: boolean, tint?: string): void {
+    const color = tint ?? this.ch.colors.light;
     this.blasts.push({ x, y, r: radius, t: 0, max: 0.4, color });
     for (const e of this.enemies) {
       if (e.hp <= 0 || e.spawnT > 0) continue;
@@ -470,11 +634,15 @@ export class Game {
   private killEnemy(e: Enemy): void {
     const def = ENEMIES[e.kind];
     this.kills++;
+    if (this.front) {
+      this.front.bounty += e.kind === 'boss' ? TUNING.feedback.bountyBoss : Math.round(spawnCost(e.kind) * TUNING.feedback.bountyPerCost);
+      if (e.kind === 'boss') this.front.bosses++;
+    }
     this.onEvent('kill');
     this.splats.push({ x: e.x, y: e.y, r: e.r * 1.4, color: def.colors.dark });
     for (let i = 0; i < 12; i++) this.spark(e.x, e.y, i % 2 ? def.colors.body : def.colors.light, 50 + this.rng() * 200);
     const value = Math.max(1, Math.round(e.gold * (1 + 0.04 * (this.wave - 1))));
-    const drops = e.kind === 'boss' ? 10 : Math.min(3, value);
+    const drops = this.linked ? 0 : e.kind === 'boss' ? 10 : Math.min(3, value);
     for (let i = 0; i < drops; i++) {
       const a = this.rng() * Math.PI * 2;
       const sp = 60 + this.rng() * 120;

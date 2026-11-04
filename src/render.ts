@@ -311,6 +311,7 @@ export class Renderer {
 
     for (const pool of game.pools) this.pool(pool, game.time);
     for (const m of game.markers) this.marker(m, game.time);
+    for (const k of game.strikes) this.strike(k);
     for (const l of game.lobs) this.lob(l, game);
     for (const k2 of game.pickups) if (vis(k2.x, k2.y)) this.pickup(k2, game.time);
     const sorted = [...game.enemies].sort((a, b) => a.y - b.y);
@@ -359,6 +360,25 @@ export class Renderer {
       if (this.touchMode) this.drawSticks();
       else this.crosshair();
     }
+  }
+
+  /** the warning for commander artillery: a red ring closing in on the target */
+  private strike(k: Game['strikes'][number]): void {
+    const { ctx } = this;
+    const f = Math.min(1, k.t / k.delay);
+    ctx.globalAlpha = 0.55 + 0.35 * Math.sin(k.t * 14);
+    ctx.fillStyle = 'rgba(255, 90, 40, 0.18)';
+    ctx.beginPath();
+    ctx.arc(k.x, k.y, k.r, 0, TAU);
+    ctx.fill();
+    for (const [col, lw, r] of [[INK, 9, k.r], ['#ff7a2a', 5, k.r], [INK, 7, k.r * (1 - f)], ['#ffd23f', 3, k.r * (1 - f)]] as const) {
+      ctx.strokeStyle = col;
+      ctx.lineWidth = lw;
+      ctx.beginPath();
+      ctx.arc(k.x, k.y, Math.max(2, r), 0, TAU);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
   }
 
   /** a pulsing ground ring with a label where the commander pointed */
