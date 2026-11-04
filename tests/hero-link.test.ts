@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Envelope, Messages } from '../link/protocol';
 import { CHARACTERS } from '../src/characters';
 import { frontProgress, handleEnvelope, heroState, type HeroCtx, type MoldLevels } from '../src/coop';
+import { TUNING } from '../src/tuning';
 import { Game, type FrontSpec, type Input } from '../src/sim';
 
 const idle: Input = { moveX: 0, moveY: 0, aimX: 0, aimY: 0, fire: false, cast: false };
@@ -168,6 +169,76 @@ describe('fronts', () => {
     expect(frontProgress(g)).toMatchObject({ id: 'f1', kills: 0, hp: 0.5 });
     g.front!.result = 'lost';
     expect(frontProgress(g)).toBeNull();
+  });
+});
+
+describe('artillery, bounty and the war room', () => {
+  const spec: FrontSpec = { id: 'f2', seed: 9, pool: 40, tier: 1, pressure: 0.5 };
+
+  it('a strike shows a warning, then kills enemies inside the ring only', () => {
+    const { c } = ctx(new Game(CHARACTERS[0], 1));
+    const g = c.game!;
+    g.openFront(spec);
+    g.startWave();
+    const near = g.addEnemy('crawler', 1700, 1400, 1);
+    const far = g.addEnemy('crawler', 1000, 1400, 1);
+    near.spawnT = far.spawnT = 0;
+    handleEnvelope(env('strike', { x: 1700, y: 1400 }), c);
+    expect(g.strikes).toHaveLength(1);
+    g.update(0.5, idle);
+    expect(near.hp).toBe(24);
+    g.update(TUNING.strike.delay, idle);
+    expect(near.hp).toBeLessThanOrEqual(0);
+    expect(far.hp).toBeGreaterThan(0);
+    expect(g.strikes).toHaveLength(0);
+  });
+
+  it('limits strikes in flight and keeps them inside the dish', () => {
+    const g = new Game(CHARACTERS[0], 1);
+    for (let i = 0; i < 10; i++) g.addStrike(99999, 1400);
+    expect(g.strikes).toHaveLength(TUNING.strike.max);
+    expect(Math.hypot(g.strikes[0].x - 1400, g.strikes[0].y - 1400)).toBeLessThan(1400);
+    g.addStrike(NaN, 3);
+    expect(g.strikes).toHaveLength(TUNING.strike.max);
+  });
+
+  it('kills earn a bounty, bosses a tech point, and a won front frees goo', () => {
+    const g = new Game(CHARACTERS[0], 1);
+    g.openFront(spec);
+    g.startWave();
+    const boss = g.addEnemy('boss', 1500, 1400, 1);
+    const c1 = g.addEnemy('crawler', 1500, 1450, 1);
+    boss.spawnT = c1.spawnT = 0;
+    g.damageEnemy(c1, 9999, 0, 0);
+    g.damageEnemy(boss, 9999, 0, 0);
+    expect(g.front!.bounty).toBe(Math.round(1 * TUNING.feedback.bountyPerCost) + TUNING.feedback.bountyBoss);
+    expect(g.front!.bosses).toBe(1);
+    expect(g.loot).toEqual({ nutrients: g.front!.bounty, tech: TUNING.feedback.techPerBoss, goo: 0 });
+    g.front!.result = 'won';
+    expect(g.loot.goo).toBe(TUNING.feedback.gooOnWin);
+    expect(frontProgress(new Game(CHARACTERS[0], 1))).toBeNull();
+  });
+
+  it('an enemy on top of the hero can still be shot', () => {
+    const g = new Game(CHARACTERS[0], 1);
+    g.startWave();
+    const e = g.addEnemy('runner', g.player.x + 3, g.player.y, 1);
+    e.spawnT = 0;
+    for (let i = 0; i < 30 && e.hp > 0; i++) g.update(1 / 30, { ...idle, aimX: e.x, aimY: e.y, fire: true });
+    expect(e.hp).toBeLessThanOrEqual(0);
+  });
+
+  it('overview is trimmed and clamped before the map sees it', () => {
+    const got: Messages['overview'][] = [];
+    const { c } = ctx(null);
+    c.overview = (o) => got.push(o);
+    handleEnvelope(env('overview', { fronts: [{ id: 'A', pressure: 4, pool: -1, hero: true }, { id: 7 }, ...Array(20).fill({ id: 'B' })], territory: 0.4, trend: 'x' }), c);
+    expect(got).toHaveLength(1);
+    expect(got[0].fronts).toHaveLength(8 - 1);
+    expect(got[0].fronts[0]).toMatchObject({ id: 'A', pressure: 1, pool: 0, hero: true });
+    expect(got[0].trend).toBe(0);
+    handleEnvelope(env('overview', { fronts: 'no' }), c);
+    expect(got).toHaveLength(1);
   });
 });
 

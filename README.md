@@ -49,7 +49,7 @@ from `public/art/commander-*.webp`). Nothing else needs to change.
 ## Co-op (work in progress)
 
 The game works alone. A second player on the same Wi-Fi can link a commander to it; the design is in
-`docs/co-op-design.html`. So far: the link layer, a lobby, markers, upgrades and supply from the commander, and fronts.
+`docs/co-op-design.html`. So far: the link layer, a lobby, markers, upgrades and supply from the commander, fronts, artillery, a war-room map, and rewards for the commander.
 
 ```bash
 npm run lan        # same as dev, but reachable from other devices on your network
@@ -63,7 +63,11 @@ npm run lan        # same as dev, but reachable from other devices on your netwo
 - **While linked the hero has no shop and no goo.** The commander buys upgrades and supplies the hero (heal, refill mana),
   paid for from the commander's nutrients. Upgrade levels stay with each mold for as long as the link lasts and are shown
   as medals under the hero's bars. The stand-in commander has a hero panel with the upgrade list and supply buttons.
-- **Fronts.** The commander deploys the hero with `front.open` (seed, the rival's nutrient pool, wave tier, starting pressure), even from the title screen. Each enemy sent spends some of the pool; when it is empty and the last enemy falls the front is won, and if the hero falls it is lost. `front.recall` gives the hero a 5 second countdown to disengage. The hero reports `front.progress` once a second (pressure, pool left, kills) and `front.result` when decided. The stand-in commander has Open front / Recall buttons, a pressure bar, and drains its own nutrients while a front is open (zero recalls the hero). Tuning lives in `FRONT` in `src/sim.ts`.
+- **Fronts.** The commander deploys the hero with `front.open` (seed, the rival's nutrient pool, wave tier, starting pressure), even from the title screen. Each enemy sent spends some of the pool; when it is empty and the last enemy falls the front is won, and if the hero falls it is lost. `front.recall` gives the hero a 5 second countdown to disengage. The hero reports `front.progress` once a second (pressure, pool left, kills) and `front.result` when decided. The stand-in commander has Open front / Recall buttons, a pressure bar, and drains its own nutrients while a front is open (zero recalls the hero). 
+- **Artillery.** `strike` {x, y} in arena coordinates: a red warning ring closes for 1.4 s, then a blast hurts enemies inside it (never the hero). At most 4 in flight. The commander pays and enforces the cooldown. On the stand-in, tick "call a strike" and click the dish.
+- **War room.** `overview` (fronts with pressure and pool, territory, nutrient trend) arrives about once a second. The 🗺 button opens a view-only strategic board with the hero's front marked.
+- **Rewards.** `front.progress` carries a running `bounty` (nutrients earned by kills) and `bosses`; `front.result` carries `loot` {nutrients, tech, goo}. Fog reveal is the commander's job while a front is open (`feedback.revealRadius`).
+- **Playtesting.** Every tunable number is in `src/tuning.ts`. Press **F2** (or open with `?debug`) for a panel that edits them live, saves them in the browser, shows the front's state, and downloads a JSON log of what happened.
 - If a device drops off it keeps its seat for 60 seconds and rejoins on its own; after that, or if either side leaves,
   both games carry on solo.
 - `link/` holds the protocol, relay and client shared by the games. `vite preview` serves the relay too.

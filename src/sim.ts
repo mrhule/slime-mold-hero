@@ -1,6 +1,7 @@
 import type { CharacterDef } from './characters';
 import { BOSS_SPRITES, ENEMIES, planWave, spawnCost, type EnemyKind, type Spawn } from './enemies';
 import { mulberry32 } from './rng';
+import { TUNING } from './tuning';
 import { UPGRADES, derive, emptyLevels, upgradeCost, type Derived, type Levels } from './upgrades';
 
 /** The dish: a circle of radius ARENA_R centred at (ARENA_R, ARENA_R). */
@@ -73,14 +74,17 @@ export interface FrontState {
   result: FrontOutcome | null;
   /** seconds left to disengage after a recall; 0 when not recalled */
   recallT: number;
+  /** nutrients the hero's kills have earned the commander so far */
+  bounty: number;
+  /** bosses killed, each one a tech point for the commander */
+  bosses: number;
 }
 
-/** tuning for front mode, kept together so playtests can change it in one place */
-export const FRONT = {
-  recallSeconds: 5,
-  /** how much of the pressure comes from the hero's missing health */
-  hurtWeight: 0.4,
-};
+/** a commander artillery strike: a warning ring, then a blast */
+export interface Strike { x: number; y: number; r: number; t: number; delay: number; damage: number }
+
+/** what the commander keeps from a front */
+export interface FrontLoot { nutrients: number; tech: number; goo: number }
 
 export class Game {
   readonly ch: CharacterDef;
@@ -99,6 +103,8 @@ export class Game {
   obstacles: Obstacle[] = [];
   /** spots the commander has pointed out */
   markers: Marker[] = [];
+  /** artillery the commander has called in */
+  strikes: Strike[] = [];
   /** drained by the renderer each frame */
   splats: Splat[] = [];
   phase: Phase = 'shop';
@@ -160,6 +166,33 @@ export class Game {
     if (this.markers.length > 3) this.markers.shift();
   }
 
+  /** artillery from the commander, in arena coordinates; lands after a warning `delay` */
+  addStrike(x: number, y: number): void {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || this.strikes.length >= TUNING.strike.max || this.phase === 'dead') return;
+    const dx = x - CENTER.x;
+    const dy = y - CENTER.y;
+    const d = Math.hypot(dx, dy);
+    const max = ARENA_R - 40;
+    if (d > max) { x = CENTER.x + (dx / d) * max; y = CENTER.y + (dy / d) * max; }
+    const s = TUNING.strike;
+    this.strikes.push({ x, y, r: s.radius, t: 0, delay: s.delay, damage: s.damage });
+  }
+
+  private updateStrikes(dt: number): void {
+    for (const k of this.strikes) {
+      k.t += dt;
+      if (k.t >= k.delay) this.explode(k.x, k.y, k.r, k.damage, 700, false, '#ff9a3c');
+    }
+    this.strikes = this.strikes.filter((k) => k.t < k.delay);
+  }
+
+  /** what the commander keeps from this front so far */
+  get loot(): FrontLoot {
+    const f = this.front;
+    if (!f) return { nutrients: 0, tech: 0, goo: 0 };
+    return { nutrients: f.bounty, tech: f.bosses * TUNING.feedback.techPerBoss, goo: f.result === 'won' ? TUNING.feedback.gooOnWin : 0 };
+  }
+
   get enemiesLeft(): number {
     return this.enemies.length + this.queue.length;
   }
@@ -182,7 +215,7 @@ export class Game {
   /** open this game as a front: the linked, endless waves become a fight over a nutrient pool */
   openFront(spec: FrontSpec): void {
     this.linked = true;
-    this.front = { spec, pool: Math.max(0, spec.pool), result: null, recallT: 0 };
+    this.front = { spec, pool: Math.max(0, spec.pool), result: null, recallT: 0, bounty: 0, bosses: 0 };
   }
 
   /** the rival spends its pool on the wave; whatever does not fit is never sent */
@@ -202,7 +235,7 @@ export class Game {
   recall(): void {
     const f = this.front;
     if (!f || f.result || f.recallT > 0) return;
-    f.recallT = FRONT.recallSeconds;
+    f.recallT = TUNING.front.recallSeconds;
   }
 
   /** who is winning this front, 0 (our side) to 1 (the rival's): the commander's pressure meter */
@@ -212,7 +245,7 @@ export class Game {
     if (f.result === 'won') return 0;
     const left = f.spec.pool > 0 ? f.pool / f.spec.pool : 0;
     const hurt = 1 - Math.max(0, this.player.hp) / this.stats.maxHp;
-    return Math.max(0, Math.min(1, f.spec.pressure * left + hurt * FRONT.hurtWeight));
+    return Math.max(0, Math.min(1, f.spec.pressure * left + hurt * TUNING.front.hurtWeight));
   }
 
   private tickFront(dt: number): void {
@@ -291,6 +324,7 @@ export class Game {
     this.updateBullets(dt);
     this.updateLobs(dt);
     this.updatePools(dt);
+    this.updateStrikes(dt);
     this.updatePickups(dt);
     this.enemies = this.enemies.filter((e) => e.hp > 0);
 
@@ -352,13 +386,21 @@ export class Game {
     const w = this.stats.weapon;
     p.fireCd = 1 / w.rate;
     p.recoil = 4;
+    // an enemy already in the muzzle zone would be behind the bullet's first step, so start the shot inside the hero
+    const close = this.enemies.some((e) => {
+      if (e.hp <= 0 || e.spawnT > 0) return false;
+      const dx = e.x - p.x;
+      const dy = e.y - p.y;
+      return Math.hypot(dx, dy) < p.r + 8 + e.r + w.size && dx * Math.cos(p.aim) + dy * Math.sin(p.aim) > -e.r;
+    });
+    const lead = close ? 0 : p.r + 8;
     const fan = w.pellets > 1 ? Math.max(w.spread, 0.05 * (w.pellets - 1)) : 0;
     for (let i = 0; i < w.pellets; i++) {
       const off = w.pellets > 1 ? -fan + (2 * fan * i) / (w.pellets - 1) : 0;
       const a = p.aim + off + (this.rng() - 0.5) * w.spread;
       const speed = w.speed * (0.94 + this.rng() * 0.12);
-      const sx = p.x + Math.cos(p.aim) * (p.r + 8);
-      const sy = p.y + Math.sin(p.aim) * (p.r + 8);
+      const sx = p.x + Math.cos(p.aim) * lead;
+      const sy = p.y + Math.sin(p.aim) * lead;
       this.bullets.push({
         x: sx, y: sy, px: sx, py: sy, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, r: w.size,
         damage: w.damage * this.stats.strength, life: w.range / w.speed, pierce: w.pierce, hit: [], friendly: true,
@@ -388,8 +430,8 @@ export class Game {
   }
 
   /** Area damage with knockback; `pool` leaves a slowing acid puddle behind. */
-  private explode(x: number, y: number, radius: number, damage: number, knock: number, pool: boolean): void {
-    const color = this.ch.colors.light;
+  private explode(x: number, y: number, radius: number, damage: number, knock: number, pool: boolean, tint?: string): void {
+    const color = tint ?? this.ch.colors.light;
     this.blasts.push({ x, y, r: radius, t: 0, max: 0.4, color });
     for (const e of this.enemies) {
       if (e.hp <= 0 || e.spawnT > 0) continue;
@@ -592,6 +634,10 @@ export class Game {
   private killEnemy(e: Enemy): void {
     const def = ENEMIES[e.kind];
     this.kills++;
+    if (this.front) {
+      this.front.bounty += e.kind === 'boss' ? TUNING.feedback.bountyBoss : Math.round(spawnCost(e.kind) * TUNING.feedback.bountyPerCost);
+      if (e.kind === 'boss') this.front.bosses++;
+    }
     this.onEvent('kill');
     this.splats.push({ x: e.x, y: e.y, r: e.r * 1.4, color: def.colors.dark });
     for (let i = 0; i < 12; i++) this.spark(e.x, e.y, i % 2 ? def.colors.body : def.colors.light, 50 + this.rng() * 200);

@@ -1,3 +1,5 @@
+import { TUNING } from './tuning';
+
 export type EnemyKind = 'crawler' | 'runner' | 'spitter' | 'brute' | 'splitter' | 'boss';
 
 export interface EnemyDef {
@@ -34,10 +36,8 @@ export interface Spawn {
 }
 
 /** what a spawn costs out of a front's nutrient pool (the boss has no wave budget cost of its own) */
-export const BOSS_POOL_COST = 20;
-
 export function spawnCost(kind: EnemyKind): number {
-  return kind === 'boss' ? BOSS_POOL_COST : ENEMIES[kind].cost;
+  return kind === 'boss' ? TUNING.front.bossPoolCost : ENEMIES[kind].cost;
 }
 
 export function isBossWave(wave: number): boolean {
@@ -46,8 +46,9 @@ export function isBossWave(wave: number): boolean {
 
 /** Decides what spawns when. A budget is spent on random affordable kinds; every fifth wave adds a boss. */
 export function planWave(wave: number, rng: () => number): Spawn[] {
-  let budget = 5 + wave * 3.2 + wave * wave * 0.18;
-  if (isBossWave(wave)) budget *= 0.6;
+  const t = TUNING.waves;
+  let budget = t.base + wave * t.perWave + wave * wave * t.perWaveSq;
+  if (isBossWave(wave)) budget *= t.bossShare;
   const avail = Object.values(ENEMIES).filter((d) => d.kind !== 'boss' && d.minWave <= wave);
   const kinds: EnemyKind[] = [];
   while (budget >= 1 && kinds.length < 90) {

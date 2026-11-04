@@ -2,6 +2,7 @@ import { Link, WebSocketTransport } from '../link/client';
 import type { Envelope, Messages } from '../link/protocol';
 import { RELAY_PATH } from '../link/relay-path';
 import { CHARACTERS } from './characters';
+import { dlog } from './debug';
 import type { FrontSpec, Game } from './sim';
 import { UPGRADES, emptyLevels, type Levels } from './upgrades';
 
@@ -19,6 +20,8 @@ export interface HeroCtx {
   molds: MoldLevels;
   /** deploy to a front: start a fresh arena built from the spec */
   openFront: (spec: FrontSpec) => void;
+  /** the latest war-room overview from the commander */
+  overview?: (o: Messages['overview']) => void;
   send: <K extends keyof Messages>(type: K, body: Messages[K]) => void;
 }
 
@@ -44,6 +47,7 @@ const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFi
  */
 export function handleEnvelope(env: Envelope, ctx: HeroCtx): boolean {
   const b = (env.body ?? {}) as Record<string, unknown>;
+  if (env.type !== 'ping' && env.type !== 'overview') dlog(`from ${env.role}: ${env.type}`, env.body);
   switch (env.type) {
     case 'marker': {
       const x = num(b.x);
@@ -83,12 +87,35 @@ export function handleEnvelope(env: Envelope, ctx: HeroCtx): boolean {
       });
       return true;
     }
+    case 'strike': {
+      const x = num(b.x);
+      const y = num(b.y);
+      if (ctx.game && x !== null && y !== null) ctx.game.addStrike(x, y);
+      return false;
+    }
+    case 'overview': {
+      const o = parseOverview(b);
+      if (o) ctx.overview?.(o);
+      return false;
+    }
     case 'front.recall':
       if (ctx.game && ctx.game.front?.spec.id === b.id) ctx.game.recall();
       return false;
     default:
       return false;
   }
+}
+
+/** the war-room data, trimmed to what the map draws; null if it is not shaped right */
+export function parseOverview(b: Record<string, unknown>): Messages['overview'] | null {
+  if (!Array.isArray(b.fronts)) return null;
+  const unit = (v: unknown) => Math.max(0, Math.min(1, num(v) ?? 0));
+  const fronts = b.fronts.slice(0, 8).flatMap((raw: unknown) => {
+    const f = (raw ?? {}) as Record<string, unknown>;
+    if (typeof f.id !== 'string' || f.id.length > 40) return [];
+    return [{ id: f.id, name: typeof f.name === 'string' ? f.name.slice(0, 20) : undefined, pressure: unit(f.pressure), pool: unit(f.pool), hero: f.hero === true }];
+  });
+  return { fronts, territory: unit(b.territory), trend: Math.max(-999, Math.min(999, num(b.trend) ?? 0)) };
 }
 
 /** the one-second report for the commander's pressure meter, or null when no front is open */
@@ -102,5 +129,7 @@ export function frontProgress(game: Game): Messages['front.progress'] | null {
     hp: Math.round((game.player.hp / game.stats.maxHp) * 100) / 100,
     pressure: Math.round(game.pressure * 100) / 100,
     pool: f.spec.pool > 0 ? Math.round((f.pool / f.spec.pool) * 100) / 100 : 0,
+    bounty: f.bounty,
+    bosses: f.bosses,
   };
 }

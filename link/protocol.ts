@@ -61,9 +61,19 @@ export interface Messages {
   /** commander -> hero: retreat; the hero has a short countdown to disengage */
   'front.recall': { id: string };
   /** hero -> commander: how the fight is going, about once a second. pressure 0 (ours) to 1 (rival's); pool is the share of the rival's nutrients left. */
-  'front.progress': { id: string; wave: number; kills: number; hp: number; pressure: number; pool: number };
+  'front.progress': {
+    id: string; wave: number; kills: number; hp: number; pressure: number; pool: number;
+    /** nutrients the hero's kills have earned so far (a running total, so a lost message does no harm) */
+    bounty: number;
+    /** bosses killed so far, each one a tech point */
+    bosses: number;
+  };
   /** hero -> commander: the front is decided */
-  'front.result': { id: string; outcome: 'won' | 'lost' | 'recalled'; kills: number };
+  'front.result': { id: string; outcome: 'won' | 'lost' | 'recalled'; kills: number; loot: { nutrients: number; tech: number; goo: number } };
+  /** commander -> hero: artillery on a spot, in arena coordinates. It lands after a warning ring. */
+  strike: { x: number; y: number };
+  /** commander -> hero: about once a second, drives the war-room map. The hero never answers it. */
+  overview: { fronts: { id: string; name?: string; pressure: number; pool: number; hero: boolean }[]; territory: number; trend: number };
   'hero.state': { mold: string; wave: number; hp: number; maxHp: number; mana: number; maxMana: number; levels: Record<string, number> };
 }
 

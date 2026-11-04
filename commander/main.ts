@@ -1,6 +1,7 @@
 import { Link, WebSocketTransport } from '../link/client';
 import type { Messages } from '../link/protocol';
 import { RELAY_PATH } from '../link/relay-path';
+import { TUNING } from '../src/tuning';
 import { UPGRADES, upgradeCost } from '../src/upgrades';
 
 /** A throwaway commander: proves the link end to end before Slime Mold has its own side. */
@@ -34,8 +35,8 @@ const refresh = () => {
 link.onState((s) => { log(`state: ${s}`); refresh(); renderPanel(); });
 link.onMessage((e) => {
   if (e.type === 'hero.state') { hero = e.body as Messages['hero.state']; renderPanel(); return; }
-  if (e.type === 'front.progress') { const p = e.body as Messages['front.progress']; if (p.id === front?.id) { front.progress = p; renderPanel(); } return; }
-  if (e.type === 'front.result') { const r = e.body as Messages['front.result']; log(`front ${r.id}: ${r.outcome}, ${r.kills} kills`); if (r.id === front?.id) { front.outcome = r.outcome; renderPanel(); } return; }
+  if (e.type === 'front.progress') { const p = e.body as Messages['front.progress']; if (p.id === front?.id) { nutrients += Math.max(0, p.bounty - front.bounty); front.bounty = p.bounty; front.progress = p; renderPanel(); } return; }
+  if (e.type === 'front.result') { const r = e.body as Messages['front.result']; log(`front ${r.id}: ${r.outcome}, ${r.kills} kills`); if (r.id === front?.id) { front.outcome = r.outcome; nutrients += r.loot.goo; tech += r.loot.tech; log(`loot: ${r.loot.nutrients} nutrients earned, ${r.loot.goo} goo, ${r.loot.tech} tech`); renderPanel(); } return; }
   if (e.type === 'pong') log(`pong ${Math.round(performance.now() - (e.body as { t: number }).t)} ms`);
   else log(`${e.role} sent ${e.type}`);
 });
@@ -48,36 +49,61 @@ canvas.addEventListener('pointerdown', (e) => {
   const r = canvas.getBoundingClientRect();
   const x = ((e.clientX - r.left) / r.width) * ARENA;
   const y = ((e.clientY - r.top) / r.height) * ARENA;
-  link.send('marker', { x, y, label: 'GO' });
-  log(`marker ${Math.round(x)}, ${Math.round(y)}`);
+  if (strikeMode()) {
+    if (nutrients < TUNING.strike.cost || performance.now() < strikeReady) return log('strike not ready');
+    nutrients -= TUNING.strike.cost;
+    strikeReady = performance.now() + TUNING.strike.cooldown * 1000;
+    link.send('strike', { x, y });
+    log(`strike ${Math.round(x)}, ${Math.round(y)}`);
+  } else {
+    link.send('marker', { x, y, label: 'GO' });
+    log(`marker ${Math.round(x)}, ${Math.round(y)}`);
+  }
   draw();
   ctx.fillStyle = '#ffd23f';
   ctx.beginPath();
   ctx.arc((x / ARENA) * 300, (y / ARENA) * 300, 5, 0, Math.PI * 2);
   ctx.fill();
 });
+let strikeReady = 0;
+const strikeMode = (): boolean => $<HTMLInputElement>('strikeMode').checked;
+
 /** the commander's side of the economy: a made-up pool of nutrients that trickles in */
 let nutrients = 600;
 let hero: Messages['hero.state'] | null = null;
 /** an open front costs the commander too: nutrients drain every second until it is decided; at zero the front collapses */
-const FRONT_DRAIN = 4;
 let fronts = 0;
-let front: { id: string; progress: Messages['front.progress'] | null; outcome: string | null } | null = null;
+let tech = 0;
+let front: { id: string; progress: Messages['front.progress'] | null; outcome: string | null; bounty: number } | null = null;
 setInterval(() => {
   nutrients += 15;
+  sendOverview();
   if (front && !front.outcome) {
-    nutrients = Math.max(0, nutrients - FRONT_DRAIN);
+    nutrients = Math.max(0, nutrients - TUNING.front.drainPerSecond);
     if (nutrients === 0) { link.send('front.recall', { id: front.id }); log('out of nutrients: the front collapses'); }
   }
   renderPanel();
 }, 1000);
 
+/** what the hero's war-room map shows: the open front is real, the others drift on their own */
+const others = [{ id: 'N', name: 'North vein', pressure: 0.35, pool: 0.8 }, { id: 'S', name: 'South marsh', pressure: 0.6, pool: 0.5 }];
+function sendOverview(): void {
+  if (link.state !== 'linked') return;
+  for (const o of others) o.pressure = Math.max(0.05, Math.min(0.95, o.pressure + (Math.random() - 0.5) * 0.08));
+  const open = front && !front.outcome ? front : null;
+  const list = [
+    ...others.map((o) => ({ ...o, hero: false })),
+    ...(open ? [{ id: open.id, name: 'Front ' + open.id, pressure: open.progress?.pressure ?? 0.5, pool: open.progress?.pool ?? 1, hero: true }] : []),
+  ];
+  link.send('overview', { fronts: list, territory: 0.45, trend: 15 - (open ? TUNING.front.drainPerSecond : 0) });
+}
+
 function renderPanel(): void {
   $('panel').hidden = link.state !== 'linked';
   if (link.state !== 'linked') return;
-  $('nutrients').textContent = `Nutrients ${Math.floor(nutrients)}`;
-  ($('healBtn') as HTMLButtonElement).disabled = !hero || nutrients < 40;
-  ($('manaBtn') as HTMLButtonElement).disabled = !hero || nutrients < 30;
+  $('nutrients').textContent = `Nutrients ${Math.floor(nutrients)} · Tech ${tech}`;
+  ($('healBtn') as HTMLButtonElement).disabled = !hero || nutrients < TUNING.supply.healCost;
+  ($('manaBtn') as HTMLButtonElement).disabled = !hero || nutrients < TUNING.supply.manaCost;
   const open = !!front && !front.outcome;
   ($('frontBtn') as HTMLButtonElement).disabled = open; // a hero waiting on the title screen can be deployed too
   ($('recallBtn') as HTMLButtonElement).disabled = !open;
@@ -112,13 +138,13 @@ $('ups').addEventListener('click', (e) => {
   renderPanel();
 });
 $('frontBtn').addEventListener('click', () => {
-  front = { id: `F${++fronts}`, progress: null, outcome: null };
+  front = { id: `F${++fronts}`, progress: null, outcome: null, bounty: 0 };
   link.send('front.open', { id: front.id, seed: Math.floor(Math.random() * 1e9), pool: 60, tier: 1, pressure: 0.5 });
   renderPanel();
 });
 $('recallBtn').addEventListener('click', () => { if (front) link.send('front.recall', { id: front.id }); });
-$('healBtn').addEventListener('click', () => { if (hero && nutrients >= 40) { nutrients -= 40; link.send('supply', { health: 0.4, mana: 0 }); renderPanel(); } });
-$('manaBtn').addEventListener('click', () => { if (hero && nutrients >= 30) { nutrients -= 30; link.send('supply', { health: 0, mana: 1 }); renderPanel(); } });
+$('healBtn').addEventListener('click', () => { if (hero && nutrients >= TUNING.supply.healCost) { nutrients -= TUNING.supply.healCost; link.send('supply', { health: TUNING.supply.healFraction, mana: 0 }); renderPanel(); } });
+$('manaBtn').addEventListener('click', () => { if (hero && nutrients >= TUNING.supply.manaCost) { nutrients -= TUNING.supply.manaCost; link.send('supply', { health: 0, mana: 1 }); renderPanel(); } });
 
 const joinCode = new URLSearchParams(location.search).get('join');
 if (joinCode) { $<HTMLInputElement>('code').value = joinCode; void link.join(joinCode).catch(refresh); }
