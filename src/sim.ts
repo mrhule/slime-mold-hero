@@ -440,11 +440,12 @@ export class Game {
       return Math.hypot(dx, dy) < p.r + 8 + e.r + w.size && dx * Math.cos(p.aim) + dy * Math.sin(p.aim) > -e.r;
     });
     const lead = close ? 0 : p.r + 8;
+    // no random scatter: every shot leaves the same way, and a multi-pellet weapon fires the same fan each time
     const fan = w.pellets > 1 ? Math.max(w.spread, 0.05 * (w.pellets - 1)) : 0;
     for (let i = 0; i < w.pellets; i++) {
       const off = w.pellets > 1 ? -fan + (2 * fan * i) / (w.pellets - 1) : 0;
-      const a = p.aim + off + (this.rng() - 0.5) * w.spread;
-      const speed = w.speed * (0.94 + this.rng() * 0.12);
+      const a = p.aim + off;
+      const speed = w.speed;
       const sx = p.x + Math.cos(p.aim) * lead;
       const sy = p.y + Math.sin(p.aim) * lead;
       this.bullets.push({

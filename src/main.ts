@@ -189,7 +189,7 @@ enemies ${game!.enemiesLeft} hp ${Math.round(game!.player.hp)}/${game!.stats.max
   };
   link.onState(() => {
     dlog('link', link.state);
-    if (link.state === 'solo') { warroom.clear(); if (!pair?.busy) resetRoute(); }
+    if (link.state === 'solo') { warroom.clear(); renderer.weather.set(null); if (!pair?.busy) resetRoute(); }
     if (link.state === 'linked' && pair) { pair = null; showCoop(); }
     syncLinked();
     ui.setLink(linkText());
@@ -230,7 +230,8 @@ enemies ${game!.enemiesLeft} hp ${Math.round(game!.player.hp)}/${game!.stats.max
     if (link.state === 'linked' && game) { molds[game.ch.id] = { ...game.levels }; report(); }
   };
   link.onMessage((e) => { if (handleEnvelope(e, { game, molds, openFront: (spec) => { dlog('front.open', spec); start(charId || CHARACTERS[0].id, spec); },
-    overview: (o) => warroom.update(o), send: (t, b) => link.send(t, b) })) report(); });
+    overview: (o) => warroom.update(o),
+    climate: (c) => renderer.weather.set(c), send: (t, b) => link.send(t, b) })) report(); });
   setInterval(() => { settleFront(); report(); }, 1000);
   window.addEventListener('beforeunload', () => link.leave());
 

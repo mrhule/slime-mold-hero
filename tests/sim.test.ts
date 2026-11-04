@@ -108,4 +108,45 @@ describe('a run', () => {
       expect(Number.isFinite(g.player.hp)).toBe(true);
     }
   });
+
+  it('fires the same way every shot, with no random scatter', () => {
+    for (const ch of CHARACTERS.filter((c) => !c.locked)) {
+      const g = new Game(ch, 7);
+      g.startWave();
+      const shots: string[] = [];
+      for (let i = 0; i < 6; i++) {
+        g.player.fireCd = 0;
+        g.bullets = [];
+        g.update(1 / 60, { moveX: 0, moveY: 0, aimX: g.player.x + 300, aimY: g.player.y + 120, fire: true, cast: false });
+        shots.push(g.bullets.filter((b) => b.friendly).map((b) => `${b.vx.toFixed(3)},${b.vy.toFixed(3)}`).join('|'));
+      }
+      expect(shots[0]).not.toBe('');
+      expect(new Set(shots).size).toBe(1);
+    }
+  });
+
+  it('a better weapon fires more bullets, each hitting harder and bigger', () => {
+    for (const ch of CHARACTERS.filter((c) => !c.locked)) {
+      let prev = derive(ch, emptyLevels()).weapon;
+      for (let wl = 1; wl <= 10; wl++) {
+        const w = derive(ch, { ...emptyLevels(), weapon: wl }).weapon;
+        expect(w.damage).toBeGreaterThan(prev.damage);
+        expect(w.size).toBeGreaterThan(prev.size);
+        expect(w.pellets).toBeGreaterThanOrEqual(prev.pellets);
+        prev = w;
+      }
+      expect(prev.pellets).toBe(ch.weapon.pellets + 3);
+    }
+    const base = new Game(CHARACTERS[0], 3);
+    const maxed = new Game(CHARACTERS[0], 3, { ...emptyLevels(), weapon: 10 });
+    for (const g of [base, maxed]) {
+      g.startWave();
+      g.player.fireCd = 0;
+      g.update(1 / 60, { moveX: 0, moveY: 0, aimX: g.player.x + 300, aimY: g.player.y, fire: true, cast: false });
+    }
+    const shots = (g: Game) => g.bullets.filter((b) => b.friendly);
+    expect(shots(maxed).length).toBe(shots(base).length + 3);
+    expect(shots(maxed)[0].damage).toBeGreaterThan(shots(base)[0].damage);
+    expect(shots(maxed)[0].r).toBeGreaterThan(shots(base)[0].r);
+  });
 });

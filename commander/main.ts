@@ -87,6 +87,7 @@ let front: { id: string; progress: Messages['front.progress'] | null; outcome: s
 setInterval(() => {
   nutrients += 15;
   sendOverview();
+  sendClimate();
   if (front && !front.outcome) {
     nutrients = Math.max(0, nutrients - TUNING.front.drainPerSecond);
     if (nutrients === 0) { link.send('front.recall', { id: front.id }); log('out of nutrients: the front collapses'); }
@@ -96,6 +97,14 @@ setInterval(() => {
 
 /** what the hero's war-room map shows: the open front is real, the others drift on their own */
 const others = [{ id: 'N', name: 'North vein', pressure: 0.35, pool: 0.8 }, { id: 'S', name: 'South marsh', pressure: 0.6, pool: 0.5 }];
+/** the stand-in decides the weather from two drop-downs; the real commander uses its own climate */
+function sendClimate(): void {
+  if (link.state !== 'linked') return;
+  link.send('climate', { season: $<HTMLSelectElement>('season').value as Messages['climate']['season'], weather: $<HTMLSelectElement>('weather').value as Messages['climate']['weather'], intensity: 0.8 });
+}
+$('season').addEventListener('change', sendClimate);
+$('weather').addEventListener('change', sendClimate);
+
 function sendOverview(): void {
   if (link.state !== 'linked') return;
   for (const o of others) o.pressure = Math.max(0.05, Math.min(0.95, o.pressure + (Math.random() - 0.5) * 0.08));

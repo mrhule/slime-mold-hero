@@ -3,6 +3,7 @@ import type { Envelope, Messages } from '../link/protocol';
 import { RELAY_PATH } from '../link/relay-path';
 import { CHARACTERS } from './characters';
 import { dlog } from './debug';
+import { parseClimate } from './weather';
 import type { FrontSpec, Game } from './sim';
 import { UPGRADES, emptyLevels, type Levels } from './upgrades';
 
@@ -61,6 +62,8 @@ export interface HeroCtx {
   openFront: (spec: FrontSpec) => void;
   /** the latest war-room overview from the commander */
   overview?: (o: Messages['overview']) => void;
+  /** the commander's season and weather */
+  climate?: (c: Messages['climate']) => void;
   send: <K extends keyof Messages>(type: K, body: Messages[K]) => void;
 }
 
@@ -88,7 +91,7 @@ const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFi
  */
 export function handleEnvelope(env: Envelope, ctx: HeroCtx): boolean {
   const b = (env.body ?? {}) as Record<string, unknown>;
-  if (env.type !== 'ping' && env.type !== 'overview') dlog(`from ${env.role}: ${env.type}`, env.body);
+  if (env.type !== 'ping' && env.type !== 'overview' && env.type !== 'climate') dlog(`from ${env.role}: ${env.type}`, env.body);
   switch (env.type) {
     case 'marker': {
       const x = num(b.x);
@@ -132,6 +135,11 @@ export function handleEnvelope(env: Envelope, ctx: HeroCtx): boolean {
       const x = num(b.x);
       const y = num(b.y);
       if (ctx.game && x !== null && y !== null) ctx.game.addStrike(x, y);
+      return false;
+    }
+    case 'climate': {
+      const c = parseClimate(b);
+      if (c) ctx.climate?.(c);
       return false;
     }
     case 'overview': {

@@ -1,4 +1,5 @@
 import { TUNING } from './tuning';
+import { WeatherFx } from './weather';
 import { ENEMIES } from './enemies';
 import { ARENA_R, CENTER, type Enemy, type Game } from './sim';
 import { mulberry32 } from './rng';
@@ -157,6 +158,8 @@ export class Renderer {
   /** touch aiming cue: by hand (a line), or at the nearest enemy (a ring round it) */
   aimMode: 'manual' | 'auto' | null = null;
   autoTarget: { x: number; y: number; r: number } | null = null;
+  /** the commander's weather, drawn over everything in the world */
+  readonly weather = new WeatherFx();
   /** show where to put each thumb until the player has used it */
   hints = { move: false, aim: false };
 
@@ -363,6 +366,7 @@ export class Renderer {
     if (this.touchMode && game.phase !== 'dead') this.aimCue(p);
     ctx.restore();
 
+    this.weather.draw(ctx, w, h, game.time);
     // vignette and crosshair in screen space
     const v = this.imgs.vignette;
     ctx.globalAlpha = 0.4;

@@ -70,6 +70,8 @@ export interface Messages {
   };
   /** hero -> commander: the front is decided */
   'front.result': { id: string; outcome: 'won' | 'lost' | 'recalled'; kills: number; loot: { nutrients: number; tech: number; goo: number } };
+  /** commander -> hero: the season and weather on the commander's map, so both players are under the same sky. Sent when it changes and about every few seconds. The commander decides it; the hero only draws it. */
+  climate: { season: 'spring' | 'summer' | 'fall' | 'winter'; weather: 'clear' | 'rain' | 'storm' | 'fog' | 'frost' | 'snow' | 'blizzard'; intensity: number };
   /** commander -> hero: artillery on a spot, in arena coordinates. It lands after a warning ring. */
   strike: { x: number; y: number };
   /** commander -> hero: about once a second, drives the war-room map. The hero never answers it. */

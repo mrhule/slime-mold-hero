@@ -242,6 +242,23 @@ describe('artillery, bounty and the war room', () => {
   });
 });
 
+describe('weather from the commander', () => {
+  it('passes a valid climate on, clamps the intensity, and ignores anything else', () => {
+    const got: Messages['climate'][] = [];
+    const { c } = ctx(null);
+    c.climate = (x) => got.push(x);
+    handleEnvelope(env('climate', { season: 'winter', weather: 'blizzard', intensity: 9 }), c);
+    handleEnvelope(env('climate', { season: 'fall', weather: 'rain' }), c);
+    handleEnvelope(env('climate', { season: 'monsoon', weather: 'rain', intensity: 1 }), c);
+    handleEnvelope(env('climate', { season: 'fall', weather: 'lava', intensity: 1 }), c);
+    handleEnvelope(env('climate', null), c);
+    expect(got).toEqual([
+      { season: 'winter', weather: 'blizzard', intensity: 1 },
+      { season: 'fall', weather: 'rain', intensity: 0.5 },
+    ]);
+  });
+});
+
 describe('roaming', () => {
   it('has no waves, drops nutrients to harvest, and pays them out as a running total', () => {
     const g = new Game(CHARACTERS[0], 4);
