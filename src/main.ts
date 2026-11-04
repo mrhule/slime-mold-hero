@@ -34,6 +34,7 @@ async function main(): Promise<void> {
 
   const start = (id: string, front?: FrontSpec) => {
     charId = id;
+    (document.activeElement as HTMLElement | null)?.blur?.(); // close the on-screen keyboard if a text box still has it
     const ch = CHARACTERS.find((c) => c.id === id) ?? CHARACTERS[0];
     game = new Game(ch, front?.seed ?? Math.floor(Math.random() * 1e9), isLinked() ? molds[id] : undefined);
     game.linked = isLinked();
@@ -48,8 +49,25 @@ async function main(): Promise<void> {
     // linked with no front to fight: wander and harvest; otherwise the waves start
     if (isLinked() && !front) game.startRoam();
     else game.startWave();
-    if (controls.touchMode) void document.documentElement.requestFullscreen?.().catch(() => {});
+    if (controls.touchMode) goFullscreen();
   };
+
+  // The browser's own bars take a third of a phone held sideways. Chrome on Android can hide them with the Fullscreen
+  // API (needs a tap); iPhone Safari cannot, so there the game has to be added to the home screen (see README).
+  const installed = () => matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches;
+  const fsBtn = document.getElementById('fsBtn') as HTMLButtonElement;
+  const syncFsBtn = () => { fsBtn.hidden = !document.fullscreenEnabled || !!document.fullscreenElement || installed(); };
+  function goFullscreen(): void {
+    if (!document.fullscreenEnabled || document.fullscreenElement || installed()) return;
+    document.documentElement.requestFullscreen({ navigationUI: 'hide' })
+      .then(() => (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }).lock?.('landscape'))
+      .catch(() => { /* refused without a tap, or not supported: the button stays */ });
+  }
+  fsBtn.addEventListener('click', goFullscreen);
+  document.addEventListener('fullscreenchange', syncFsBtn);
+  // the first touch on the page is the tap the browser wants before it will go fullscreen
+  document.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') goFullscreen(); }, { once: true, passive: true });
+  syncFsBtn();
 
   const onEvent = (e: GameEvent) => {
     sfx.play(e);
@@ -235,6 +253,9 @@ enemies ${game!.enemiesLeft} hp ${Math.round(game!.player.hp)}/${game!.stats.max
   window.addEventListener('blur', () => setPaused(true));
   document.addEventListener('visibilitychange', () => { if (document.hidden) setPaused(true); });
   window.addEventListener('resize', () => renderer.resize());
+  window.visualViewport?.addEventListener('resize', () => renderer.syncSize());
+  window.addEventListener('orientationchange', () => setTimeout(() => renderer.syncSize(), 200));
+  document.addEventListener('fullscreenchange', () => renderer.syncSize());
 
   ui.showSelect();
   ui.showHud(false);
@@ -261,6 +282,7 @@ enemies ${game!.enemiesLeft} hp ${Math.round(game!.player.hp)}/${game!.stats.max
   const frame = (now: number) => {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
+    renderer.syncSize();
     renderer.mouse = controls.mouse;
     renderer.sticks = controls.sticks();
     if (game) {

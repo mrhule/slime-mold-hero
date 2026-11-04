@@ -32,6 +32,8 @@ Designed for phones first, held sideways (portrait shows a "rotate your device" 
 | `Esc` / `P` | Pause |
 | `M` | Mute |
 
+**Full screen on a phone.** The first tap asks the browser to hide its bars (Chrome on Android), and a ⛶ button appears if it declines; it also locks the screen to landscape. iPhone Safari does not allow this for web pages: open the page, tap Share, **Add to Home Screen**, and start it from the new icon, which opens with no browser bars. On Android the same works through the browser menu's **Install app** or **Add to Home screen**.
+
 ## Playable molds
 
 Pick one on the title screen. Each has its own stats, weapon and spell, and all upgrades apply to whichever you pick.

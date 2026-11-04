@@ -163,6 +163,11 @@ export class Renderer {
     this.resize();
   }
 
+  /** the real window size changed without a resize event (keyboard closing, fullscreen, rotating) */
+  syncSize(): void {
+    if (window.innerWidth !== this.w || window.innerHeight !== this.h) this.resize();
+  }
+
   resize(): void {
     const dpr = Math.min(this.touchMode ? 1.5 : 2, window.devicePixelRatio || 1);
     this.w = window.innerWidth;
@@ -199,8 +204,9 @@ export class Renderer {
   /** The dish floor, scenery and rim never change during a run, so draw them once. */
   private bake(game: Game): void {
     const size = ARENA_R * 2;
-    const c = document.createElement('canvas');
-    c.width = c.height = size;
+    // one canvas for the whole session: a phone cannot always afford a second 2800 px canvas while the old one waits to be freed
+    const c = this.baked ?? document.createElement('canvas');
+    c.width = c.height = size; // also clears it
     const g = c.getContext('2d')!;
     const rng = mulberry32(77);
     g.fillStyle = '#080a07';
