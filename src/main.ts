@@ -1,13 +1,14 @@
 import './style.css';
 import { Sfx } from './audio';
 import { CHARACTERS } from './characters';
-import { frontProgress, handleEnvelope, heroState, makeLink, type MoldLevels } from './coop';
+import { deadTransport, reply, RtcHub, type Invite } from '../link/rtc';
+import { frontProgress, handleEnvelope, heroState, makeLink, relayTransport, type MoldLevels } from './coop';
 import { Controls } from './input';
 import { Renderer, loadImages } from './render';
 import { Game, type Enemy, type FrontSpec, type FrontState, type GameEvent, type Phase } from './sim';
 import { dlog, setupDebug } from './debug';
 import { WarRoom } from './warroom';
-import { Ui, saveBest, type CoopInfo } from './ui';
+import { Ui, saveBest, type CoopInfo, type PairInfo } from './ui';
 
 async function main(): Promise<void> {
   const canvas = document.getElementById('game') as HTMLCanvasElement;
@@ -79,6 +80,11 @@ async function main(): Promise<void> {
       link.join(code).catch(() => {}).finally(() => { busy = false; showCoop(); });
     },
     coopLeave: () => { link.leave(); showCoop(); },
+    pairHost: () => void pairHost(),
+    pairJoinStart: () => { pair = { mode: 'join', offer: null, answer: null, busy: false, error: null }; ui.showPair(pair); },
+    pairAccept: (text) => void pairAccept(text),
+    pairJoin: (text) => void pairJoin(text),
+    pairCancel: () => { link.leave(); resetRoute(); showCoop(); },
     coopBack: () => {
       joinError = null;
       if (!game) ui.showSelect();
@@ -88,7 +94,44 @@ async function main(): Promise<void> {
   });
 
   // ---- co-op link: this game plays the hero. It works alone, and the link only adds things.
-  const link = makeLink();
+  const route = { make: relayTransport };
+  const link = makeLink(route);
+  // serverless pairing: one device runs the relay in its page, the other connects to it by WebRTC
+  let hub: RtcHub | null = null;
+  let invite: Invite | null = null;
+  let pair: PairInfo | null = null;
+  const resetRoute = () => {
+    route.make = relayTransport;
+    invite?.cancel();
+    hub?.close();
+    invite = hub = pair = null;
+  };
+  const showPair = (patch: Partial<PairInfo>) => { if (pair) { pair = { ...pair, ...patch }; ui.showPair(pair); } };
+  const pairFail = (e: unknown) => showPair({ busy: false, error: e instanceof Error ? e.message : 'Could not pair' });
+  const pairHost = async () => {
+    pair = { mode: 'host', offer: null, answer: null, busy: false, error: null };
+    ui.showPair(pair);
+    try {
+      const h = hub = new RtcHub();
+      route.make = () => h.localTransport();
+      invite = await h.invite(await link.host());
+      showPair({ offer: invite.offer });
+    } catch (e) { pairFail(e); }
+  };
+  const pairAccept = async (text: string) => {
+    showPair({ busy: true, error: null });
+    try { await invite?.accept(text); showPair({ busy: false }); } catch (e) { pairFail(e); }
+  };
+  const pairJoin = async (text: string) => {
+    showPair({ busy: true, error: null });
+    try {
+      const r = await reply(text);
+      let used = false;
+      route.make = () => (used ? deadTransport() : ((used = true), r.transport));
+      showPair({ busy: false, answer: r.answer });
+      link.join(r.code).catch(() => { pairFail(new Error(link.error ?? 'The host did not accept the reply in time')); resetRoute(); });
+    } catch (e) { pairFail(e); }
+  };
   const warroom = new WarRoom();
   setupDebug(() => {
     const f = game?.front;
@@ -116,7 +159,8 @@ enemies ${game!.enemiesLeft} hp ${Math.round(game!.player.hp)}/${game!.stats.max
   };
   link.onState(() => {
     dlog('link', link.state);
-    if (link.state === 'solo') warroom.clear();
+    if (link.state === 'solo') { warroom.clear(); if (!pair?.busy) resetRoute(); }
+    if (link.state === 'linked' && pair) { pair = null; showCoop(); }
     syncLinked();
     ui.setLink(linkText());
     if (ui.coopShown) showCoop();
