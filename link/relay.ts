@@ -20,6 +20,10 @@ interface Room {
 export interface RelayOptions {
   graceMs?: number;
   maxPeers?: number;
+  /** most rooms open at once; a host asking for more is refused */
+  maxRooms?: number;
+  /** wrong room codes one connection may try before it is cut off */
+  maxBadJoins?: number;
   rng?: () => number;
   now?: () => number;
 }
@@ -34,12 +38,18 @@ export class Relay {
   private nextId = 1;
   private grace: number;
   private maxPeers: number;
+  private maxRooms: number;
+  private maxBadJoins: number;
+  /** failed joins per connection, so the 4 letter codes cannot be guessed at speed */
+  private badJoins = new Map<RelayConn, number>();
   private rng: () => number;
   private now: () => number;
 
   constructor(opts: RelayOptions = {}) {
     this.grace = opts.graceMs ?? GRACE_MS;
     this.maxPeers = opts.maxPeers ?? 8;
+    this.maxRooms = opts.maxRooms ?? 64;
+    this.maxBadJoins = opts.maxBadJoins ?? 8;
     this.rng = opts.rng ?? Math.random;
     this.now = opts.now ?? Date.now;
   }
@@ -51,8 +61,10 @@ export class Relay {
         return;
       case 'host': {
         if (this.conns.has(conn)) return conn.send({ k: 'error', reason: 'busy' });
+        if (this.rooms.size >= this.maxRooms) return conn.send({ k: 'error', reason: 'busy' });
         let code = makeRoomCode(this.rng);
         for (let i = 0; this.rooms.has(code) && i < 50; i++) code = makeRoomCode(this.rng);
+        if (this.rooms.has(code)) return conn.send({ k: 'error', reason: 'busy' }); // never take over a room that exists
         const room: Room = { code, members: new Map() };
         this.rooms.set(code, room);
         const me = this.seat(room, conn, msg.role, msg.name);
@@ -61,7 +73,13 @@ export class Relay {
       }
       case 'join': {
         const room = this.rooms.get(msg.code);
-        if (!room) return conn.send({ k: 'error', reason: 'no-room' });
+        if (!room) {
+          const n = (this.badJoins.get(conn) ?? 0) + 1;
+          this.badJoins.set(conn, n);
+          conn.send({ k: 'error', reason: n >= this.maxBadJoins ? 'busy' : 'no-room' });
+          if (n >= this.maxBadJoins) conn.close();
+          return;
+        }
         const old = msg.peer ? room.members.get(msg.peer) : undefined;
         if (old && old.droppedAt !== null) {
           // the same peer coming back inside the grace period
@@ -96,6 +114,7 @@ export class Relay {
 
   /** the connection went away: keep the seat for the grace period */
   disconnect(conn: RelayConn): void {
+    this.badJoins.delete(conn);
     const at = this.conns.get(conn);
     if (!at) return;
     this.conns.delete(conn);

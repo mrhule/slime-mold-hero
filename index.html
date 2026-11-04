@@ -6,6 +6,10 @@
     <meta name="theme-color" content="#080a07" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Slime Hero" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icon-192.png" />
     <title>Slime Mold: Hero</title>
   </head>
   <body>
@@ -17,9 +21,11 @@
       </div>
       <div class="wave"><b id="waveNum"></b><small id="waveLeft"></small></div>
       <div class="gold" id="gold"></div>
+      <div class="combo" id="combo" hidden></div>
       <div class="pill" id="linkPill" hidden></div>
       <div class="medals" id="medals"></div>
       <button class="pause" id="pauseBtn" aria-label="Pause">❚❚</button>
+      <button class="pause" id="fsBtn" aria-label="Full screen" hidden>⛶</button>
       <div class="spell"><div id="spellIcon"></div><small id="spellName"></small></div>
       <div class="boss" id="bossBar" hidden><i id="bossFill"></i><span>RIVAL COMMANDER</span></div>
     </div>

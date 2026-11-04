@@ -5,14 +5,47 @@ export const STICK_R = 60;
 
 export interface Stick { id: number; ox: number; oy: number; x: number; y: number }
 
-function vec(s: Stick): { x: number; y: number; mag: number } {
+/** a thumb that rests or jitters inside this many pixels of where it landed counts as centred */
+export const DEAD_ZONE = 8;
+
+/** the stick's direction and strength (0 to 1), with a dead zone and a smooth start so a resting thumb does not creep */
+export function vec(s: Stick): { x: number; y: number; mag: number } {
   const dx = s.x - s.ox;
   const dy = s.y - s.oy;
   const m = Math.hypot(dx, dy);
-  if (m < 1) return { x: 0, y: 0, mag: 0 };
-  const k = Math.min(1, m / STICK_R);
+  if (m <= DEAD_ZONE) return { x: 0, y: 0, mag: 0 };
+  const k = Math.min(1, (m - DEAD_ZONE) / (STICK_R - DEAD_ZONE));
   return { x: (dx / m) * k, y: (dy / m) * k, mag: k };
 }
+
+/**
+ * Move the thumb. Past the edge of the stick the stick's centre follows the thumb, so reversing direction takes a
+ * short move instead of dragging all the way back across a stick the thumb had already left.
+ */
+export function dragStick(s: Stick, x: number, y: number): void {
+  s.x = x;
+  s.y = y;
+  const dx = x - s.ox;
+  const dy = y - s.oy;
+  const d = Math.hypot(dx, dy);
+  if (d > STICK_R) {
+    s.ox += (dx / d) * (d - STICK_R);
+    s.oy += (dy / d) * (d - STICK_R);
+  }
+}
+
+/**
+ * Holding the aim thumb fires. A firm push aims by hand; a thumb left near the centre aims at the nearest enemy.
+ * Switching back to auto needs the thumb nearly centred, so it does not flip at the boundary.
+ */
+export const AIM_ON = 0.35;
+export const AIM_OFF = 0.15;
+
+export function isManualAim(wasManual: boolean, mag: number): boolean {
+  return mag > (wasManual ? AIM_OFF : AIM_ON);
+}
+
+export type AimMode = 'manual' | 'auto' | null;
 
 /**
  * Touch (primary): left thumb moves, right thumb aims and fires while dragged, a button casts.
@@ -27,6 +60,12 @@ export class Controls {
   private aim: Stick | null = null;
   private castHeld = false;
   private lastAim: number | null = null;
+  /** how the hero is aiming right now, for the on-screen aim cue */
+  aimMode: AimMode = null;
+  /** a thumb has been used on each stick this session; the on-screen hints stop once both have */
+  usedMove = false;
+  usedAim = false;
+  private manual = false;
 
   constructor(canvas: HTMLCanvasElement, private onKey: (code: string) => void, private onMode: (touch: boolean) => void) {
     window.addEventListener('keydown', (e) => {
@@ -54,7 +93,7 @@ export class Controls {
     });
     canvas.addEventListener('pointermove', (e) => {
       if (e.pointerType === 'touch') {
-        for (const s of [this.move, this.aim]) if (s && s.id === e.pointerId) { s.x = e.clientX; s.y = e.clientY; }
+        for (const s of [this.move, this.aim]) if (s && s.id === e.pointerId) dragStick(s, e.clientX, e.clientY);
       }
     });
     const up = (e: PointerEvent) => {
@@ -62,8 +101,15 @@ export class Controls {
       if (this.aim?.id === e.pointerId) this.aim = null;
       if (e.pointerType !== 'touch') this.buttons.delete(e.button);
     };
-    canvas.addEventListener('pointerup', up);
-    canvas.addEventListener('pointercancel', up);
+    // a thumb can lift or be taken by the system anywhere, not only over the canvas, and a stick left behind would hold the hero
+    for (const t of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) {
+      canvas.addEventListener(t, up);
+      window.addEventListener(t, (e) => { if (e.pointerType === 'touch') up(e); });
+    }
+    // two fingers on a phone are also the gestures for zooming and scrolling the page; keep them for the game
+    document.addEventListener('gesturestart', (e) => e.preventDefault());
+    // (menus and text boxes keep their own scrolling)
+    document.addEventListener('touchmove', (e) => { if (this.touchMode && !(e.target as HTMLElement | null)?.closest?.('#overlay, #debugPanel, #warroom')) e.preventDefault(); }, { passive: false });
     window.addEventListener('pointerup', (e) => { if (e.pointerType !== 'touch') this.buttons.delete(e.button); });
     window.addEventListener('pointermove', (e) => {
       if (e.pointerType === 'mouse') {
@@ -94,6 +140,8 @@ export class Controls {
     this.move = null;
     this.aim = null;
     this.castHeld = false;
+    this.manual = false;
+    this.aimMode = null;
   }
 
   /** sticks to draw on screen */
@@ -104,14 +152,22 @@ export class Controls {
   /** `fallbackAim` is the angle to the nearest enemy, used until the player has aimed with the right stick */
   read(toWorld: (x: number, y: number) => { x: number; y: number }, p: { x: number; y: number }, fallbackAim: number | null): Input {
     if (this.touchMode) {
-      const mv = this.move ? vec(this.move) : { x: 0, y: 0 };
+      const mv = this.move ? vec(this.move) : { x: 0, y: 0, mag: 0 };
       const av = this.aim ? vec(this.aim) : null;
-      if (av && av.mag > 0.2) this.lastAim = Math.atan2(av.y, av.x);
-      const ang = this.lastAim ?? fallbackAim ?? 0;
+      if (this.move) this.usedMove = true;
+      if (this.aim) this.usedAim = true;
+      this.manual = !!av && isManualAim(this.manual, av.mag);
+      if (av && this.manual) this.lastAim = Math.atan2(av.y, av.x);
+      // the hero faces what it will shoot: the stick, else the nearest enemy, else where it walks, else where it last aimed
+      const walking = mv.mag > 0.2 ? Math.atan2(mv.y, mv.x) : null;
+      const ang = this.manual ? this.lastAim! : fallbackAim ?? walking ?? this.lastAim ?? 0;
+      if (!this.manual && fallbackAim === null && walking !== null) this.lastAim = walking;
+      const held = !!this.aim;
+      this.aimMode = !held ? null : this.manual ? 'manual' : fallbackAim !== null ? 'auto' : null;
       return {
         moveX: mv.x, moveY: mv.y,
         aimX: p.x + Math.cos(ang) * 300, aimY: p.y + Math.sin(ang) * 300,
-        fire: !!av && av.mag > 0.25, cast: this.castHeld,
+        fire: held, cast: this.castHeld,
       };
     }
     const k = this.keys;

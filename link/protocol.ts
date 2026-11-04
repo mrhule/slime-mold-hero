@@ -70,11 +70,34 @@ export interface Messages {
   };
   /** hero -> commander: the front is decided */
   'front.result': { id: string; outcome: 'won' | 'lost' | 'recalled'; kills: number; loot: { nutrients: number; tech: number; goo: number } };
+  /** commander -> hero: the season and weather on the commander's map, so both players are under the same sky. Sent when it changes and about every few seconds. The commander decides it; the hero only draws it. */
+  climate: { season: 'spring' | 'summer' | 'fall' | 'winter'; weather: 'clear' | 'rain' | 'storm' | 'fog' | 'frost' | 'snow' | 'blizzard'; intensity: number };
+  /**
+   * hero -> commander: a picture of the arena for the zoomed view, about six times a second. Every list holds plain
+   * numbers to keep it small. `obstacles` (rocks) is only sent now and then, since it never changes.
+   * enemies [x, y, kind, hp%], strikes [x, y, radius, progress%], defenses [kind (0 wall, 1 turret), x, y, hp%],
+   * drops [x, y], markers [x, y].
+   */
+  'arena.view': {
+    front: string | null;
+    hero: { x: number; y: number; hp: number; aim: number };
+    maxHp: number;
+    enemies: number[][];
+    strikes: number[][];
+    defenses: number[][];
+    drops: number[][];
+    markers: number[][];
+    obstacles?: number[][];
+  };
+  /** commander -> hero: build a wall or a turret at a spot in the arena (arena coordinates). The commander pays first. */
+  defend: { kind: 'turret' | 'wall'; x: number; y: number };
+  /** hero -> commander: whether the defense was built; if not, the commander gets its nutrients back */
+  'defend.result': { kind: 'turret' | 'wall'; x: number; y: number; ok: boolean };
   /** commander -> hero: artillery on a spot, in arena coordinates. It lands after a warning ring. */
   strike: { x: number; y: number };
   /** commander -> hero: about once a second, drives the war-room map. The hero never answers it. */
   overview: { fronts: { id: string; name?: string; pressure: number; pool: number; hero: boolean }[]; territory: number; trend: number };
-  'hero.state': { mold: string; wave: number; hp: number; maxHp: number; mana: number; maxMana: number; levels: Record<string, number> };
+  'hero.state': { mold: string; wave: number; /** nutrients harvested from drops while roaming, a running total */ harvested: number; roaming: boolean; hp: number; maxHp: number; mana: number; maxMana: number; levels: Record<string, number> };
 }
 
 const CODE_LETTERS = 'ABCDEFGHJKMNPQRSTUVWXYZ';

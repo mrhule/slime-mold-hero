@@ -20,6 +20,8 @@ export interface UiHandlers {
   pairAccept(answer: string): void;
   pairJoin(offer: string): void;
   pairCancel(): void;
+  /** the host changed the other game's address that the QR code opens */
+  coopPeer(url: string): void;
 }
 
 /** what the serverless pairing screen shows */
@@ -34,12 +36,21 @@ export interface PairInfo {
 }
 
 export interface CoopInfo {
+  /** QR code (inline SVG) that opens the other game and joins this room; null if there is no usable address */
+  qr?: string | null;
+  /** the other game's address the QR code points at */
+  peer?: string;
+  /** this page was opened as localhost, which another device cannot reach */
+  localhost?: boolean;
   state: 'solo' | 'hosting' | 'linked' | 'dropped';
   code: string | null;
   peers: { role: string; name: string; online: boolean }[];
   error: string | null;
   busy: boolean;
 }
+
+/** text from another device (a peer's name, a room code, an error) goes into the page as text, never as markup */
+const esc = (s: unknown): string => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c);
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -97,7 +108,13 @@ export class Ui {
         case 'pair-cancel': this.h.pairCancel(); break;
         case 'pair-copy': {
           const box = this.overlay.querySelector<HTMLTextAreaElement>('#pairOut');
-          if (box) { box.select(); void navigator.clipboard?.writeText(box.value).catch(() => document.execCommand('copy')); }
+          if (box) {
+            box.select();
+            // the clipboard API needs https; a page opened from the LAN over http falls back to the old way
+            const done = navigator.clipboard?.writeText(box.value);
+            if (done) done.catch(() => document.execCommand('copy'));
+            else document.execCommand('copy');
+          }
           break;
         }
       }
@@ -220,7 +237,7 @@ export class Ui {
   }
 
   showCoop(info: CoopInfo): void {
-    const peers = info.peers.map((p) => `<li>${p.online ? '●' : '○'} ${p.role === 'cmd' ? 'Commander' : 'Hero'} (${p.name})${p.online ? '' : ' · reconnecting'}</li>`).join('');
+    const peers = info.peers.map((p) => `<li>${p.online ? '●' : '○'} ${p.role === 'cmd' ? 'Commander' : 'Hero'} (${esc(p.name)})${p.online ? '' : ' · reconnecting'}</li>`).join('');
     let body: string;
     if (info.state === 'solo') {
       body = `
@@ -231,13 +248,16 @@ export class Ui {
         <div class="join"><button data-action="pair-host">Host by paste</button><button data-action="pair-join-start">Join by paste</button></div>`;
     } else if (info.state === 'hosting') {
       body = `
-        <p class="sub">Give this code to the commander.</p>
-        <div class="code">${info.code}</div>
+        <p class="sub">Scan this with the other device's camera, or give them the code.</p>
+        ${info.qr ? `<div class="qrbox">${info.qr}</div>` : ''}
+        <div class="code small">${esc(info.code)}</div>
+        ${info.localhost ? `<p class="err">This page is open as localhost, so another device cannot reach it. Open it by the network address of this computer instead.</p>` : ''}
+        <label class="peer">Other game's address <input id="peerIn" value="${esc(info.peer ?? '')}" spellcheck="false" autocapitalize="off"></label>
         <p class="sub">Waiting for them to join. You can keep playing.</p>
         <button data-action="coop-leave">Cancel</button>`;
     } else {
       body = `
-        <div class="code small">${info.code}</div>
+        <div class="code small">${esc(info.code)}</div>
         <ul class="peers">${peers}</ul>
         <p class="sub">${info.state === 'dropped' ? 'The link is down. Trying to reconnect, and play carries on meanwhile.' : 'Linked.'}</p>
         <button data-action="coop-leave">Leave</button>`;
@@ -246,16 +266,17 @@ export class Ui {
       <div class="screen coop">
         <h1>Co-op</h1>
         ${body}
-        ${info.error ? `<p class="err">${info.error}</p>` : ''}
+        ${info.error ? `<p class="err">${esc(info.error)}</p>` : ''}
         <button data-action="coop-back">Back</button>
       </div>`);
     this.coopShown = true;
+    this.overlay.querySelector('#peerIn')?.addEventListener('change', (e) => this.h.coopPeer((e.target as HTMLInputElement).value.trim()));
   }
 
   /** serverless pairing screen. Text boxes keep what is typed, so call it only when the step changes. */
   showPair(p: PairInfo): void {
     const out = (label: string, text: string) =>
-      `<p class="sub">${label}</p><textarea id="pairOut" readonly rows="4">${text}</textarea><button data-action="pair-copy">Copy</button>`;
+      `<p class="sub">${label}</p><textarea id="pairOut" readonly rows="4">${esc(text)}</textarea><button data-action="pair-copy">Copy</button>`;
     let body: string;
     if (p.mode === 'host') {
       body = p.offer
@@ -271,7 +292,7 @@ export class Ui {
         <textarea id="pairIn" rows="4" placeholder="Paste the host block" spellcheck="false"></textarea>
         <button class="big" data-action="pair-join" ${p.busy ? 'disabled' : ''}>Make reply</button>`;
     }
-    this.show(`<div class="screen coop pair"><h1>Pair by paste</h1>${body}${p.error ? `<p class="err">${p.error}</p>` : ''}<button data-action="pair-cancel">Cancel</button></div>`);
+    this.show(`<div class="screen coop pair"><h1>Pair by paste</h1>${body}${p.error ? `<p class="err">${esc(p.error)}</p>` : ''}<button data-action="pair-cancel">Cancel</button></div>`);
     this.coopShown = false;
   }
 
@@ -300,8 +321,15 @@ export class Ui {
     $('hpText').textContent = `${Math.ceil(p.hp)} / ${s.maxHp}`;
     $('manaFill').style.width = `${(p.mana / s.maxMana) * 100}%`;
     $('manaText').textContent = `${Math.floor(p.mana)} / ${s.maxMana}`;
-    $('waveNum').textContent = `WAVE ${game.wave}`;
-    $('waveLeft').textContent = game.phase === 'wave' ? `${game.enemiesLeft} left` : 'clear!';
+    const combo = $('combo');
+    const show = game.combo >= 3 && game.phase !== 'dead';
+    if (combo.hidden === show) combo.hidden = !show;
+    if (show) {
+      const text = `COMBO x${game.combo}`;
+      if (combo.textContent !== text) { combo.textContent = text; combo.classList.remove('bump'); void combo.offsetWidth; combo.classList.add('bump'); }
+    }
+    $('waveNum').textContent = game.roaming ? 'ROAMING' : `WAVE ${game.wave}`;
+    $('waveLeft').textContent = game.roaming ? `🌿 ${game.harvested} harvested` : game.phase === 'wave' ? `${game.enemiesLeft} left` : 'clear!';
     $('gold').textContent = `🟡 ${p.gold}`;
     const cd = Math.max(0, p.castCd) / s.spell.cooldown;
     const ready = p.castCd <= 0 && p.mana >= s.spell.cost;

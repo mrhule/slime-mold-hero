@@ -1,3 +1,5 @@
+import { TUNING } from './tuning';
+import { WeatherFx } from './weather';
 import { ENEMIES } from './enemies';
 import { ARENA_R, CENTER, type Enemy, type Game } from './sim';
 import { mulberry32 } from './rng';
@@ -153,6 +155,15 @@ export class Renderer {
   touchMode = false;
   sticks: Stick[] = [];
   aimWorld: { x: number; y: number } | null = null;
+  /** touch aiming cue: by hand (a line), or at the nearest enemy (a ring round it) */
+  aimMode: 'manual' | 'auto' | null = null;
+  autoTarget: { x: number; y: number; r: number } | null = null;
+  /** the commander's weather, drawn over everything in the world */
+  readonly weather = new WeatherFx();
+  /** 0 calm to 1 swamped: a red glow round the screen when the crowd closes in or health is low */
+  private danger = 0;
+  /** show where to put each thumb until the player has used it */
+  hints = { move: false, aim: false };
 
   constructor(private canvas: HTMLCanvasElement, private imgs: Images) {
     this.ctx = canvas.getContext('2d')!;
@@ -160,6 +171,11 @@ export class Renderer {
     this.decals.width = this.decals.height = ARENA_R;
     this.dctx = this.decals.getContext('2d')!;
     this.resize();
+  }
+
+  /** the real window size changed without a resize event (keyboard closing, fullscreen, rotating) */
+  syncSize(): void {
+    if (window.innerWidth !== this.w || window.innerHeight !== this.h) this.resize();
   }
 
   resize(): void {
@@ -198,8 +214,9 @@ export class Renderer {
   /** The dish floor, scenery and rim never change during a run, so draw them once. */
   private bake(game: Game): void {
     const size = ARENA_R * 2;
-    const c = document.createElement('canvas');
-    c.width = c.height = size;
+    // one canvas for the whole session: a phone cannot always afford a second 2800 px canvas while the old one waits to be freed
+    const c = this.baked ?? document.createElement('canvas');
+    c.width = c.height = size; // also clears it
     const g = c.getContext('2d')!;
     const rng = mulberry32(77);
     g.fillStyle = '#080a07';
@@ -312,6 +329,7 @@ export class Renderer {
     for (const pool of game.pools) this.pool(pool, game.time);
     for (const m of game.markers) this.marker(m, game.time);
     for (const k of game.strikes) this.strike(k);
+    for (const d of game.defenses) this.defense(d, game.time);
     for (const l of game.lobs) this.lob(l, game);
     for (const k2 of game.pickups) if (vis(k2.x, k2.y)) this.pickup(k2, game.time);
     const sorted = [...game.enemies].sort((a, b) => a.y - b.y);
@@ -348,8 +366,11 @@ export class Renderer {
       ctx.stroke();
       ctx.setLineDash([]);
     }
+    if (this.touchMode && game.phase !== 'dead') this.aimCue(p);
     ctx.restore();
 
+    this.weather.draw(ctx, w, h, game.time);
+    this.drawDanger(game);
     // vignette and crosshair in screen space
     const v = this.imgs.vignette;
     ctx.globalAlpha = 0.4;
@@ -360,6 +381,54 @@ export class Renderer {
       if (this.touchMode) this.drawSticks();
       else this.crosshair();
     }
+  }
+
+  /** a wall or a turret the commander built */
+  private defense(d: Game['defenses'][number], t: number): void {
+    const { ctx } = this;
+    const hurt = 1 - d.hp / d.maxHp;
+    ctx.save();
+    ctx.translate(d.x, d.y);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(0, d.r * 0.55, d.r * 1.05, d.r * 0.5, 0, 0, TAU);
+    ctx.fill();
+    if (d.kind === 'wall') {
+      blob(ctx, 0, 0, d.r, t, d.id, 0.04);
+      ctx.fillStyle = d.flash > 0 ? '#fff3d0' : hurt > 0.6 ? '#8a6f4a' : '#b59a68';
+      ctx.fill();
+      ink(ctx, 4);
+      ctx.strokeStyle = 'rgba(60,40,20,0.55)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-d.r * 0.5, -d.r * 0.2); ctx.lineTo(d.r * 0.1, -d.r * 0.55);
+      ctx.moveTo(-d.r * 0.1, d.r * 0.5); ctx.lineTo(d.r * 0.55, d.r * 0.1);
+      ctx.stroke();
+    } else {
+      blob(ctx, 0, 0, d.r, t, d.id, 0.03);
+      ctx.fillStyle = d.flash > 0 ? '#fff3d0' : '#6c8a58';
+      ctx.fill();
+      ink(ctx, 4);
+      ctx.rotate(d.aim);
+      ctx.fillStyle = '#3d4a35';
+      ctx.fillRect(2, -5, d.r + 6, 10);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = INK;
+      ctx.strokeRect(2, -5, d.r + 6, 10);
+      ctx.rotate(-d.aim);
+      ctx.beginPath();
+      ctx.arc(0, 0, d.r * 0.35, 0, TAU);
+      ctx.fillStyle = '#c8e8a8';
+      ctx.fill();
+      ink(ctx, 2.5);
+    }
+    if (hurt > 0.02) {
+      ctx.fillStyle = '#1d211a';
+      ctx.fillRect(-d.r, d.r + 6, d.r * 2, 5);
+      ctx.fillStyle = hurt > 0.6 ? '#e04a3a' : '#7ddc52';
+      ctx.fillRect(-d.r, d.r + 6, d.r * 2 * (1 - hurt), 5);
+    }
+    ctx.restore();
   }
 
   /** the warning for commander artillery: a red ring closing in on the target */
@@ -437,8 +506,102 @@ export class Renderer {
     }
   }
 
+  private drawDanger(game: Game): void {
+    const { ctx, w, h } = this;
+    const p = game.player;
+    let close = 0;
+    for (const e of game.enemies) if (e.spawnT <= 0 && e.hp > 0 && Math.hypot(e.x - p.x, e.y - p.y) < 380) close++;
+    const crowd = Math.max(0, Math.min(1, (close - 6) / 16));
+    const hurt = Math.max(0, Math.min(1, (0.6 - p.hp / game.stats.maxHp) / 0.4));
+    const goal = game.phase === 'dead' ? 0 : Math.max(crowd * 0.85, hurt);
+    this.danger += (goal - this.danger) * 0.08;
+    if (this.danger < 0.02) return;
+    const pulse = 0.8 + 0.2 * Math.sin(game.time * (4 + 6 * this.danger));
+    const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.3, w / 2, h / 2, Math.hypot(w, h) * 0.6);
+    g.addColorStop(0, 'rgba(190,30,20,0)');
+    g.addColorStop(1, `rgba(190,30,20,${0.5 * this.danger * pulse})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  /** what the hero is about to shoot at, so a held thumb is never a guess */
+  private aimCue(p: { x: number; y: number }): void {
+    const { ctx } = this;
+    if (this.aimMode === 'auto' && this.autoTarget) {
+      const t = this.autoTarget;
+      for (const [col, lw] of [[INK, 7], ['#ff7a5a', 3.5]] as const) {
+        ctx.strokeStyle = col;
+        ctx.lineWidth = lw;
+        ctx.setLineDash([10, 8]);
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, t.r + 10, 0, TAU);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    } else if (this.aimMode === 'manual' && this.aimWorld) {
+      const dx = this.aimWorld.x - p.x;
+      const dy = this.aimWorld.y - p.y;
+      const m = Math.hypot(dx, dy) || 1;
+      for (const [col, lw] of [[INK, 6], ['rgba(255,246,200,0.85)', 3]] as const) {
+        ctx.strokeStyle = col;
+        ctx.lineWidth = lw;
+        ctx.setLineDash([12, 10]);
+        ctx.beginPath();
+        ctx.moveTo(p.x + (dx / m) * 40, p.y + (dy / m) * 40);
+        ctx.lineTo(p.x + (dx / m) * 300, p.y + (dy / m) * 300);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    }
+  }
+
+  /** faint rings and words showing the controls to a player who has not used them yet */
+  private drawHints(): void {
+    const { ctx, w, h } = this;
+    const pulse = 0.55 + 0.25 * Math.sin(performance.now() / 400);
+    const ring = (x: number, y: number, title: string, sub: string) => {
+      ctx.globalAlpha = pulse;
+      for (const [col, lw] of [[INK, 6], ['rgba(255,246,200,0.8)', 3]] as const) {
+        ctx.strokeStyle = col;
+        ctx.lineWidth = lw;
+        ctx.setLineDash([10, 9]);
+        ctx.beginPath();
+        ctx.arc(x, y, STICK_R, 0, TAU);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.textAlign = 'center';
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = INK;
+      ctx.fillStyle = '#fff6c8';
+      ctx.font = "20px Impact, 'Arial Black', sans-serif";
+      ctx.strokeText(title, x, y - 4);
+      ctx.fillText(title, x, y - 4);
+      ctx.font = "13px Impact, 'Arial Black', sans-serif";
+      ctx.strokeText(sub, x, y + 16);
+      ctx.fillText(sub, x, y + 16);
+      ctx.globalAlpha = 1;
+    };
+    const moving = this.sticks.some((s) => s.ox < w / 2);
+    const aiming = this.sticks.some((s) => s.ox >= w / 2);
+    if (this.hints.move && !moving) ring(w * 0.17, h * 0.66, 'MOVE', 'drag here');
+    if (this.hints.aim && !aiming) {
+      ring(w * 0.62, h * 0.66, 'FIRE', 'hold = auto-aim · drag = aim');
+      ctx.globalAlpha = pulse;
+      ctx.textAlign = 'center';
+      ctx.font = "13px Impact, 'Arial Black', sans-serif";
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = INK;
+      ctx.fillStyle = '#9fdcff';
+      ctx.strokeText('SPELL', w - 70, h - 122);
+      ctx.fillText('SPELL', w - 70, h - 122);
+      ctx.globalAlpha = 1;
+    }
+  }
+
   private drawSticks(): void {
     const { ctx } = this;
+    this.drawHints();
     for (const s of this.sticks) {
       const dx = s.x - s.ox;
       const dy = s.y - s.oy;
@@ -639,6 +802,22 @@ export class Renderer {
       ctx.beginPath();
       ctx.arc(k.x - 2, k.y + bob - 2, 2, 0, TAU);
       ctx.fill();
+    } else if (k.kind === 'nutrient') {
+      const fade = Math.min(1, (TUNING.roam.dropLife - k.t) / 5);
+      ctx.globalAlpha = Math.max(0.2, fade);
+      ctx.beginPath();
+      ctx.arc(k.x, k.y + bob, 22 + Math.sin(t * 3 + k.y) * 3, 0, TAU);
+      ctx.fillStyle = 'rgba(143, 240, 192, 0.25)';
+      ctx.fill();
+      blob(ctx, k.x, k.y + bob, 11, t, k.x, 0.12);
+      ctx.fillStyle = '#5be0a8';
+      ctx.fill();
+      ink(ctx, 2.5);
+      ctx.fillStyle = '#e8fff4';
+      ctx.beginPath();
+      ctx.arc(k.x - 3, k.y + bob - 3, 3, 0, TAU);
+      ctx.fill();
+      ctx.globalAlpha = 1;
     } else {
       ctx.beginPath();
       ctx.arc(k.x, k.y + bob, 10, 0, TAU);

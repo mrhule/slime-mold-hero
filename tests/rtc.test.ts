@@ -3,6 +3,8 @@ import { Link } from '../link/client';
 import { MemoryTransport } from '../link/memory';
 import type { ServerMsg } from '../link/protocol';
 import { Relay } from '../link/relay';
+import { joinUrl } from '../src/coop';
+import { qrSvg } from '../src/qr';
 import { bridge, pack, unpack, type Channel, type Pairing } from '../link/rtc';
 import type { Transport } from '../link/client';
 import type { ClientMsg } from '../link/protocol';
@@ -86,5 +88,19 @@ describe('a host that runs the relay for a guest over a channel', () => {
     guestEnd.send('{"k":"nonsense"}');
     await new Promise((r) => setTimeout(r, 5));
     expect(seen).toEqual([{ k: 'error', reason: 'bad-message' }]);
+  });
+});
+
+describe('QR join link', () => {
+  it('carries the room code and the host relay on the address of the other game', () => {
+    expect(joinUrl('http://192.168.1.5:5175/', 'ABCD', '192.168.1.5:5173')).toBe('http://192.168.1.5:5175/?join=ABCD&relay=192.168.1.5%3A5173');
+    expect(joinUrl('192.168.1.5:5175', 'WXYZ', 'h:1')).toBe('http://192.168.1.5:5175/?join=WXYZ&relay=h%3A1');
+    expect(joinUrl('http://::bad', 'ABCD', 'h:1')).toBeNull();
+  });
+
+  it('draws a QR code for it', () => {
+    const svg = qrSvg('http://192.168.1.5:5175/?join=ABCD&relay=192.168.1.5%3A5173');
+    expect(svg.startsWith('<svg')).toBe(true);
+    expect(svg).toContain('<path');
   });
 });

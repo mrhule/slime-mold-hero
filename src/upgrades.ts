@@ -14,7 +14,7 @@ export interface UpgradeDef {
 }
 
 export const UPGRADES: UpgradeDef[] = [
-  { id: 'weapon', name: 'Weapon', icon: '🔫', baseCost: 40, growth: 1.45, max: 10, blurb: '+9% fire rate, +6% damage. Extra shot at 4 and 8, pierce at 6 and 10' },
+  { id: 'weapon', name: 'Weapon', icon: '🔫', baseCost: 40, growth: 1.45, max: 10, blurb: '+8% damage, +6% fire rate, bigger shots. Extra bullet at 3, 6 and 9, pierce at 5 and 10' },
   { id: 'strength', name: 'Strength', icon: '💪', baseCost: 30, growth: 1.4, max: 15, blurb: '+12% damage on every shot' },
   { id: 'armor', name: 'Armor', icon: '🛡️', baseCost: 35, growth: 1.4, max: 15, blurb: '+4 armor: less damage taken' },
   { id: 'vitality', name: 'Vitality', icon: '❤️', baseCost: 25, growth: 1.35, max: 20, blurb: '+25 max health (and heals that much)' },
@@ -70,10 +70,11 @@ export function derive(ch: CharacterDef, lv: Levels): Derived {
     spellPower,
     weapon: {
       ...w,
-      damage: w.damage * (1 + 0.06 * wl),
-      rate: w.rate * (1 + 0.09 * wl),
-      pellets: w.pellets + (wl >= 4 ? 1 : 0) + (wl >= 8 ? 1 : 0),
-      pierce: w.pierce + (wl >= 6 ? 1 : 0) + (wl >= 10 ? 1 : 0),
+      damage: w.damage * (1 + 0.08 * wl),
+      rate: w.rate * (1 + 0.06 * wl),
+      size: w.size * (1 + 0.05 * wl),
+      pellets: w.pellets + Math.floor(wl / 3),
+      pierce: w.pierce + (wl >= 5 ? 1 : 0) + (wl >= 10 ? 1 : 0),
     },
     spell: {
       ...ch.spell,

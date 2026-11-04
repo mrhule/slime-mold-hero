@@ -14,18 +14,70 @@ const log = (s: string) => { logEl.textContent = `${s}\n${logEl.textContent}`.sl
 const ARENA = 2800; // the hero's dish is 2800 across, centred at (1400, 1400)
 const canvas = $<HTMLCanvasElement>('dish');
 const ctx = canvas.getContext('2d')!;
+const SIDE = canvas.width;
+
+/** the latest picture of the hero's arena, and the rocks from the last time they were sent (they never change) */
+let view: Messages['arena.view'] | null = null;
+let rocks: number[][] = [];
+let viewAt = 0;
+const ENEMY_COLORS = ['#5ea83f', '#b9c733', '#8a58c4', '#b8573a', '#2aa6a0', '#d0d0d0'];
+const ENEMY_RADIUS = [16, 11, 15, 30, 20, 56];
+
+/** zoom 1 shows the whole dish; more follows the hero. Returns arena units per canvas pixel and the arena point at the canvas centre. */
+function camera(): { k: number; cx: number; cy: number } {
+  const z = parseFloat($<HTMLInputElement>('zoom').value) || 1;
+  const k = (ARENA / SIDE) / z;
+  const hx = view?.hero.x ?? 1400;
+  const hy = view?.hero.y ?? 1400;
+  return { k, cx: z <= 1 ? 1400 : hx, cy: z <= 1 ? 1400 : hy };
+}
 
 function draw(): void {
-  ctx.clearRect(0, 0, 300, 300);
+  const { k, cx, cy } = camera();
+  const X = (x: number) => SIDE / 2 + (x - cx) / k;
+  const Y = (y: number) => SIDE / 2 + (y - cy) / k;
+  const R = (r: number) => r / k;
+  ctx.clearRect(0, 0, SIDE, SIDE);
+  ctx.fillStyle = '#10130d';
+  ctx.fillRect(0, 0, SIDE, SIDE);
   ctx.beginPath();
-  ctx.arc(150, 150, 146, 0, Math.PI * 2);
+  ctx.arc(X(1400), Y(1400), R(1400), 0, Math.PI * 2);
   ctx.fillStyle = '#2a3322';
   ctx.fill();
   ctx.strokeStyle = '#6f7a55';
   ctx.lineWidth = 4;
   ctx.stroke();
+  if (!view) return;
+  ctx.fillStyle = '#4a4f40';
+  for (const [x, y, r] of rocks) { ctx.beginPath(); ctx.arc(X(x), Y(y), Math.max(2, R(r)), 0, Math.PI * 2); ctx.fill(); }
+  ctx.fillStyle = '#5be0a8';
+  for (const [x, y] of view.drops) { ctx.beginPath(); ctx.arc(X(x), Y(y), Math.max(2.5, R(14)), 0, Math.PI * 2); ctx.fill(); }
+  for (const [x, y] of view.markers) { ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(X(x), Y(y), Math.max(4, R(34)), 0, Math.PI * 2); ctx.stroke(); }
+  for (const [kind, x, y, hp] of view.defenses) {
+    ctx.fillStyle = kind === 1 ? '#6c8a58' : '#b59a68';
+    ctx.beginPath(); ctx.arc(X(x), Y(y), Math.max(3, R(kind === 1 ? TUNING.defense.turretRadius : TUNING.defense.wallRadius)), 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = hp < 40 ? '#e04a3a' : '#0b0b0b'; ctx.lineWidth = 2; ctx.stroke();
+  }
+  for (const [x, y, kindIdx] of view.enemies) {
+    ctx.fillStyle = ENEMY_COLORS[kindIdx] ?? '#c33';
+    ctx.beginPath(); ctx.arc(X(x), Y(y), Math.max(2, R(ENEMY_RADIUS[kindIdx] ?? 16)), 0, Math.PI * 2); ctx.fill();
+  }
+  for (const [x, y, r, pct] of view.strikes) {
+    ctx.strokeStyle = '#ff7a2a'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(X(x), Y(y), R(r), 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(X(x), Y(y), R(r) * (1 - pct / 100), 0, Math.PI * 2); ctx.stroke();
+  }
+  const h = view.hero;
+  ctx.fillStyle = '#ffd23f';
+  ctx.beginPath(); ctx.arc(X(h.x), Y(h.y), Math.max(4, R(24)), 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#0b0b0b'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(X(h.x), Y(h.y)); ctx.lineTo(X(h.x) + Math.cos(h.aim) * 24, Y(h.y) + Math.sin(h.aim) * 24); ctx.stroke();
+  ctx.fillStyle = '#7ddc52';
+  ctx.fillRect(X(h.x) - 18, Y(h.y) - Math.max(10, R(24)) - 8, 36 * h.hp, 4);
 }
 draw();
+setInterval(() => { if (view && performance.now() - viewAt > 2000) { view = null; $('viewInfo').textContent = 'no view'; } draw(); }, 100);
+$('zoom').addEventListener('input', draw);
 
 const refresh = () => {
   const peers = link.peers.filter((p) => p.id !== link.me?.id).map((p) => `${p.role}${p.online ? '' : ' (away)'}`).join(', ');
@@ -34,7 +86,27 @@ const refresh = () => {
 };
 link.onState((s) => { log(`state: ${s}`); refresh(); renderPanel(); });
 link.onMessage((e) => {
-  if (e.type === 'hero.state') { hero = e.body as Messages['hero.state']; renderPanel(); return; }
+  if (e.type === 'arena.view') {
+    view = e.body as Messages['arena.view'];
+    if (view.obstacles) rocks = view.obstacles;
+    viewAt = performance.now();
+    $('viewInfo').textContent = `${view.enemies.length} enemies · ${view.defenses.length}/${TUNING.defense.max} defenses`;
+    return;
+  }
+  if (e.type === 'defend.result') {
+    const r = e.body as Messages['defend.result'];
+    if (!r.ok) { nutrients += r.kind === 'turret' ? TUNING.defense.turretCost : TUNING.defense.wallCost; log(`${r.kind} refused (spot blocked or too many): refunded`); }
+    else log(`${r.kind} built`);
+    return;
+  }
+  if (e.type === 'hero.state') {
+    hero = e.body as Messages['hero.state'];
+    if (hero.harvested < harvested) harvested = 0; // a new game started
+    nutrients += hero.harvested - harvested;
+    harvested = hero.harvested;
+    renderPanel();
+    return;
+  }
   if (e.type === 'front.progress') { const p = e.body as Messages['front.progress']; if (p.id === front?.id) { nutrients += Math.max(0, p.bounty - front.bounty); front.bounty = p.bounty; front.progress = p; renderPanel(); } return; }
   if (e.type === 'front.result') { const r = e.body as Messages['front.result']; log(`front ${r.id}: ${r.outcome}, ${r.kills} kills`); if (r.id === front?.id) { front.outcome = r.outcome; nutrients += r.loot.goo; tech += r.loot.tech; log(`loot: ${r.loot.nutrients} nutrients earned, ${r.loot.goo} goo, ${r.loot.tech} tech`); renderPanel(); } return; }
   if (e.type === 'pong') log(`pong ${Math.round(performance.now() - (e.body as { t: number }).t)} ms`);
@@ -47,26 +119,28 @@ $('leave').addEventListener('click', () => { link.leave(); refresh(); });
 $('ping').addEventListener('click', () => link.send('ping', { t: performance.now() }));
 canvas.addEventListener('pointerdown', (e) => {
   const r = canvas.getBoundingClientRect();
-  const x = ((e.clientX - r.left) / r.width) * ARENA;
-  const y = ((e.clientY - r.top) / r.height) * ARENA;
-  if (strikeMode()) {
+  const { k, cx, cy } = camera();
+  const x = Math.round(cx + ((e.clientX - r.left) / r.width * SIDE - SIDE / 2) * k);
+  const y = Math.round(cy + ((e.clientY - r.top) / r.height * SIDE - SIDE / 2) * k);
+  const tool = $<HTMLSelectElement>('tool').value;
+  if (tool === 'strike') {
     if (nutrients < TUNING.strike.cost || performance.now() < strikeReady) return log('strike not ready');
     nutrients -= TUNING.strike.cost;
     strikeReady = performance.now() + TUNING.strike.cooldown * 1000;
     link.send('strike', { x, y });
-    log(`strike ${Math.round(x)}, ${Math.round(y)}`);
+    log(`strike ${x}, ${y}`);
+  } else if (tool === 'turret' || tool === 'wall') {
+    const cost = tool === 'turret' ? TUNING.defense.turretCost : TUNING.defense.wallCost;
+    if (nutrients < cost) return log(`a ${tool} costs ${cost}`);
+    nutrients -= cost; // paid first; the hero's answer refunds it if the spot is no good
+    link.send('defend', { kind: tool, x, y });
+    log(`${tool} at ${x}, ${y}`);
   } else {
     link.send('marker', { x, y, label: 'GO' });
-    log(`marker ${Math.round(x)}, ${Math.round(y)}`);
+    log(`marker ${x}, ${y}`);
   }
-  draw();
-  ctx.fillStyle = '#ffd23f';
-  ctx.beginPath();
-  ctx.arc((x / ARENA) * 300, (y / ARENA) * 300, 5, 0, Math.PI * 2);
-  ctx.fill();
 });
 let strikeReady = 0;
-const strikeMode = (): boolean => $<HTMLInputElement>('strikeMode').checked;
 
 /** the commander's side of the economy: a made-up pool of nutrients that trickles in */
 let nutrients = 600;
@@ -74,10 +148,13 @@ let hero: Messages['hero.state'] | null = null;
 /** an open front costs the commander too: nutrients drain every second until it is decided; at zero the front collapses */
 let fronts = 0;
 let tech = 0;
+/** the hero's running harvest total we have already been paid for */
+let harvested = 0;
 let front: { id: string; progress: Messages['front.progress'] | null; outcome: string | null; bounty: number } | null = null;
 setInterval(() => {
   nutrients += 15;
   sendOverview();
+  sendClimate();
   if (front && !front.outcome) {
     nutrients = Math.max(0, nutrients - TUNING.front.drainPerSecond);
     if (nutrients === 0) { link.send('front.recall', { id: front.id }); log('out of nutrients: the front collapses'); }
@@ -87,6 +164,14 @@ setInterval(() => {
 
 /** what the hero's war-room map shows: the open front is real, the others drift on their own */
 const others = [{ id: 'N', name: 'North vein', pressure: 0.35, pool: 0.8 }, { id: 'S', name: 'South marsh', pressure: 0.6, pool: 0.5 }];
+/** the stand-in decides the weather from two drop-downs; the real commander uses its own climate */
+function sendClimate(): void {
+  if (link.state !== 'linked') return;
+  link.send('climate', { season: $<HTMLSelectElement>('season').value as Messages['climate']['season'], weather: $<HTMLSelectElement>('weather').value as Messages['climate']['weather'], intensity: 0.8 });
+}
+$('season').addEventListener('change', sendClimate);
+$('weather').addEventListener('change', sendClimate);
+
 function sendOverview(): void {
   if (link.state !== 'linked') return;
   for (const o of others) o.pressure = Math.max(0.05, Math.min(0.95, o.pressure + (Math.random() - 0.5) * 0.08));
@@ -118,7 +203,7 @@ function renderPanel(): void {
   $('manaBar').style.width = `${(hero.mana / hero.maxMana) * 100}%`;
   $('manaTxt').textContent = `Mana ${hero.mana} / ${hero.maxMana}`;
   $('ups').innerHTML = UPGRADES.map((u) => {
-    const lv = hero!.levels[u.id] ?? 0;
+    const lv = Math.max(0, Math.min(99, Number(hero!.levels[u.id]) || 0)); // from another device: a number, never markup
     const cost = lv >= u.max ? null : upgradeCost(u, lv);
     const dis = cost === null || nutrients < cost ? 'disabled' : '';
     return `<div class="up"><span>${u.icon} ${u.name} <small>${lv}/${u.max}</small></span><button data-up="${u.id}" ${dis}>${cost === null ? 'MAX' : cost}</button></div>`;
@@ -130,7 +215,7 @@ $('ups').addEventListener('click', (e) => {
   const id = (e.target as HTMLElement).closest<HTMLElement>('[data-up]')?.dataset.up;
   const def = UPGRADES.find((u) => u.id === id);
   if (!hero || !def) return;
-  const lv = hero.levels[def.id] ?? 0;
+  const lv = Math.max(0, Math.min(99, Number(hero.levels[def.id]) || 0));
   if (lv >= def.max || nutrients < upgradeCost(def, lv)) return;
   nutrients -= upgradeCost(def, lv);
   hero.levels[def.id] = lv + 1;

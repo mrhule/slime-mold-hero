@@ -2,11 +2,13 @@ import './style.css';
 import { Sfx } from './audio';
 import { CHARACTERS } from './characters';
 import { deadTransport, reply, RtcHub, type Invite } from '../link/rtc';
-import { frontProgress, handleEnvelope, heroState, makeLink, relayTransport, type MoldLevels } from './coop';
+import { arenaView, defaultPeer, frontProgress, handleEnvelope, heroState, joinUrl, makeLink, relayTransport, savePeer, type MoldLevels } from './coop';
+import { qrSvg } from './qr';
 import { Controls } from './input';
 import { Renderer, loadImages } from './render';
 import { Game, type Enemy, type FrontSpec, type FrontState, type GameEvent, type Phase } from './sim';
 import { dlog, setupDebug } from './debug';
+import { TUNING } from './tuning';
 import { WarRoom } from './warroom';
 import { Ui, saveBest, type CoopInfo, type PairInfo } from './ui';
 
@@ -33,6 +35,7 @@ async function main(): Promise<void> {
 
   const start = (id: string, front?: FrontSpec) => {
     charId = id;
+    (document.activeElement as HTMLElement | null)?.blur?.(); // close the on-screen keyboard if a text box still has it
     const ch = CHARACTERS.find((c) => c.id === id) ?? CHARACTERS[0];
     game = new Game(ch, front?.seed ?? Math.floor(Math.random() * 1e9), isLinked() ? molds[id] : undefined);
     game.linked = isLinked();
@@ -44,12 +47,32 @@ async function main(): Promise<void> {
     deadTimer = 0;
     ui.showHud(true);
     ui.hide();
-    game.startWave();
-    if (controls.touchMode) void document.documentElement.requestFullscreen?.().catch(() => {});
+    // linked with no front to fight: wander and harvest; otherwise the waves start
+    if (isLinked() && !front) game.startRoam();
+    else game.startWave();
+    if (controls.touchMode) goFullscreen();
   };
+
+  // The browser's own bars take a third of a phone held sideways. Chrome on Android can hide them with the Fullscreen
+  // API (needs a tap); iPhone Safari cannot, so there the game has to be added to the home screen (see README).
+  const installed = () => matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches;
+  const fsBtn = document.getElementById('fsBtn') as HTMLButtonElement;
+  const syncFsBtn = () => { fsBtn.hidden = !document.fullscreenEnabled || !!document.fullscreenElement || installed(); };
+  function goFullscreen(): void {
+    if (!document.fullscreenEnabled || document.fullscreenElement || installed()) return;
+    document.documentElement.requestFullscreen({ navigationUI: 'hide' })
+      .then(() => (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }).lock?.('landscape'))
+      .catch(() => { /* refused without a tap, or not supported: the button stays */ });
+  }
+  fsBtn.addEventListener('click', goFullscreen);
+  document.addEventListener('fullscreenchange', syncFsBtn);
+  // the first touch on the page is the tap the browser wants before it will go fullscreen
+  document.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') goFullscreen(); }, { once: true, passive: true });
+  syncFsBtn();
 
   const onEvent = (e: GameEvent) => {
     sfx.play(e);
+    if (controls.touchMode) { if (e === 'hurt') navigator.vibrate?.(25); else if (e === 'cast') navigator.vibrate?.(14); }
     if (!game) return;
     if (e === 'waveStart') {
       dlog('wave', { n: game.wave, front: game.front?.spec.id, pool: game.front?.pool });
@@ -85,6 +108,7 @@ async function main(): Promise<void> {
     pairAccept: (text) => void pairAccept(text),
     pairJoin: (text) => void pairJoin(text),
     pairCancel: () => { link.leave(); resetRoute(); showCoop(); },
+    coopPeer: (url) => { savePeer(url); showCoop(); },
     coopBack: () => {
       joinError = null;
       if (!game) ui.showSelect();
@@ -141,13 +165,20 @@ enemies ${game!.enemiesLeft} hp ${Math.round(game!.player.hp)}/${game!.stats.max
   });
   let busy = false;
   let joinError: string | null = null;
-  const coopInfo = (): CoopInfo => ({
+  const coopInfo = (): CoopInfo => {
+    const peer = defaultPeer();
+    const url = link.state === 'hosting' && link.code ? joinUrl(peer, link.code) : null;
+    return {
+    qr: url ? qrSvg(url) : null,
+    peer,
+    localhost: ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname),
     state: link.state,
     code: link.code,
     peers: link.peers.map((p) => ({ role: p.role, name: p.name, online: p.online })),
     error: joinError ?? link.error,
     busy,
-  });
+    };
+  };
   const showCoop = (): void => ui.showCoop(coopInfo());
   const linkText = (): string | null => {
     switch (link.state) {
@@ -159,7 +190,7 @@ enemies ${game!.enemiesLeft} hp ${Math.round(game!.player.hp)}/${game!.stats.max
   };
   link.onState(() => {
     dlog('link', link.state);
-    if (link.state === 'solo') { warroom.clear(); if (!pair?.busy) resetRoute(); }
+    if (link.state === 'solo') { warroom.clear(); renderer.weather.set(null); if (!pair?.busy) resetRoute(); }
     if (link.state === 'linked' && pair) { pair = null; showCoop(); }
     syncLinked();
     ui.setLink(linkText());
@@ -184,17 +215,30 @@ enemies ${game!.enemiesLeft} hp ${Math.round(game!.player.hp)}/${game!.stats.max
     dlog('front.result', { id: f.spec.id, outcome: f.result, kills: game.kills, wave: game.wave, loot: game.loot });
     if (f.result === 'lost') return;
     ui.banner(f.result === 'won' ? 'FRONT HELD' : 'RECALLED', f.result === 'won');
-    setTimeout(() => { if (game?.front === f) { game = null; ui.showHud(false); ui.showSelect(); } }, 2500);
+    // back to wandering, ready for the next front
+    setTimeout(() => {
+      if (game?.front !== f) return;
+      if (isLinked()) start(charId);
+      else { game = null; ui.showHud(false); ui.showSelect(); }
+    }, 2500);
   };
   const syncLinked = () => {
     document.body.classList.toggle('linked', isLinked());
     if (game) game.linked = isLinked();
+    if (game?.roaming && !isLinked()) game.endRoam(); // the commander left: ordinary waves again
+    if (link.state === 'linked' && game && !game.front && !game.roaming) game.startRoam(); // a commander joined a game in progress
     if (link.state === 'solo') for (const k of Object.keys(molds)) delete molds[k];
     if (link.state === 'linked' && game) { molds[game.ch.id] = { ...game.levels }; report(); }
   };
   link.onMessage((e) => { if (handleEnvelope(e, { game, molds, openFront: (spec) => { dlog('front.open', spec); start(charId || CHARACTERS[0].id, spec); },
-    overview: (o) => warroom.update(o), send: (t, b) => link.send(t, b) })) report(); });
+    overview: (o) => warroom.update(o),
+    climate: (c) => renderer.weather.set(c), send: (t, b) => link.send(t, b) })) report(); });
   setInterval(() => { settleFront(); report(); }, 1000);
+  // the commander's zoomed view: a picture of the arena a few times a second (rocks only now and then)
+  let viewTick = 0;
+  setInterval(() => {
+    if (game && link.state === 'linked') link.send('arena.view', arenaView(game, viewTick++ % 24 === 0));
+  }, 1000 / TUNING.view.perSecond);
   window.addEventListener('beforeunload', () => link.leave());
 
   const controls = new Controls(
@@ -217,6 +261,9 @@ enemies ${game!.enemiesLeft} hp ${Math.round(game!.player.hp)}/${game!.stats.max
   window.addEventListener('blur', () => setPaused(true));
   document.addEventListener('visibilitychange', () => { if (document.hidden) setPaused(true); });
   window.addEventListener('resize', () => renderer.resize());
+  window.visualViewport?.addEventListener('resize', () => renderer.syncSize());
+  window.addEventListener('orientationchange', () => setTimeout(() => renderer.syncSize(), 200));
+  document.addEventListener('fullscreenchange', () => renderer.syncSize());
 
   ui.showSelect();
   ui.showHud(false);
@@ -239,16 +286,23 @@ enemies ${game!.enemiesLeft} hp ${Math.round(game!.player.hp)}/${game!.stats.max
     return best;
   };
 
+  // the on-screen thumb hints show until a player has used both sticks once
+  let hintsOn = (() => { try { return !localStorage.getItem('sms-hints-done'); } catch { return true; } })();
   let last = performance.now();
   const frame = (now: number) => {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
+    renderer.syncSize();
     renderer.mouse = controls.mouse;
     renderer.sticks = controls.sticks();
+    renderer.aimMode = controls.aimMode;
+    renderer.hints = hintsOn ? { move: !controls.usedMove, aim: !controls.usedAim } : { move: false, aim: false };
+    if (hintsOn && controls.usedMove && controls.usedAim) { hintsOn = false; try { localStorage.setItem('sms-hints-done', '1'); } catch { /* storage unavailable */ } }
     if (game) {
       const portraitTouch = controls.touchMode && window.innerHeight > window.innerWidth;
       if (!paused && !portraitTouch) {
         const near = nearest(game, 700);
+        renderer.autoTarget = near ? { x: near.x, y: near.y, r: near.r } : null;
         const fallback = near ? Math.atan2(near.y - game.player.y, near.x - game.player.x) : null;
         const input = controls.read((x, y) => renderer.screenToWorld(x, y), game.player, fallback);
         if (controls.touchMode) {
