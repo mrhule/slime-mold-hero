@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { CHARACTERS } from '../src/characters';
 import { isBossWave, planWave } from '../src/enemies';
 import { mulberry32 } from '../src/rng';
+import { TUNING } from '../src/tuning';
 import { Game, type Input } from '../src/sim';
 import { derive, emptyLevels, upgradeCost, UPGRADES } from '../src/upgrades';
 
@@ -64,13 +65,17 @@ describe('upgrades', () => {
 
 describe('a run', () => {
   it('first wave can be cleared by shooting, ending in the shop with gold', () => {
+    const shopEvery = TUNING.combat.shopEvery;
+    TUNING.combat.shopEvery = 1; // the shop after every wave, so the end of wave one is the shop
     const g = new Game(CHARACTERS[0], 42);
+    g.player.hp = g.stats.maxHp = 100000; // this is about clearing, not surviving
     g.startWave();
     autoplay(g, 120);
     for (let i = 0; i < 100 && g.phase === 'clear'; i++) g.update(1 / 30, idle);
     expect(g.phase).toBe('shop');
     expect(g.kills).toBeGreaterThan(0);
     expect(g.player.gold).toBeGreaterThan(0);
+    TUNING.combat.shopEvery = shopEvery;
   });
 
   it('is replayable from a seed', () => {
@@ -148,5 +153,74 @@ describe('a run', () => {
     expect(shots(maxed).length).toBe(shots(base).length + 3);
     expect(shots(maxed)[0].damage).toBeGreaterThan(shots(base)[0].damage);
     expect(shots(maxed)[0].r).toBeGreaterThan(shots(base)[0].r);
+  });
+});
+
+describe('combat pace', () => {
+  const near = (g: Game) => [...g.enemies].filter((e) => e.spawnT <= 0).sort((a, b) => Math.hypot(a.x - g.player.x, a.y - g.player.y) - Math.hypot(b.x - g.player.x, b.y - g.player.y))[0];
+  const play = (g: Game, seconds: number, stop: () => boolean) => {
+    for (let i = 0; i < seconds * 30 && !stop(); i++) {
+      const e = near(g);
+      g.update(1 / 30, { ...idle, aimX: e?.x ?? g.player.x + 1, aimY: e?.y ?? g.player.y, fire: !!e });
+    }
+  };
+
+  it('plans more enemies than before, and spreads them over a shorter time', () => {
+    const plan = planWave(8, mulberry32(2));
+    expect(plan.length).toBeGreaterThan(25);
+    expect(Math.max(...plan.map((s) => s.delay))).toBeLessThanOrEqual(TUNING.combat.spanMax + 1);
+  });
+
+  it('sends packs: crawlers and runners that arrive together share a spot', () => {
+    const plan = planWave(6, mulberry32(11));
+    const packs = new Map<number, number>();
+    for (const s of plan) if (s.pack !== undefined) packs.set(s.pack, (packs.get(s.pack) ?? 0) + 1);
+    expect(packs.size).toBeGreaterThan(0);
+    for (const n of packs.values()) expect(n).toBeGreaterThanOrEqual(1);
+    const g = new Game(CHARACTERS[0], 5);
+    g.startWave();
+    g.update(30, { ...idle, aimX: 0, aimY: 0 }); // let the whole wave arrive
+    expect(g.enemies.length).toBeGreaterThan(10);
+  });
+
+  it('runs one wave into the next before the shop, and opens the shop after the third', () => {
+    const g = new Game(CHARACTERS[0], 42);
+    g.player.hp = g.stats.maxHp = 100000;
+    g.startWave();
+    play(g, 300, () => g.wave >= 2);
+    expect(g.wave).toBe(2);
+    expect(g.phase).toBe('wave'); // no shop, no pause
+    play(g, 300, () => g.phase === 'shop' || g.phase === 'clear');
+    expect(['clear', 'shop']).toContain(g.phase);
+    expect(g.wave).toBe(3);
+  });
+
+  it('never chains away from a boss wave', () => {
+    const g = new Game(CHARACTERS[0], 3);
+    g.player.hp = g.stats.maxHp = 100000;
+    g.startWave();
+    g.wave = 5; // a boss wave
+    g.update(0.1, idle);
+    expect(g.wave).toBe(5);
+  });
+
+  it('kills build a combo that speeds fire, and give mana back', () => {
+    const g = new Game(CHARACTERS[0], 8);
+    g.player.hp = g.stats.maxHp = 100000;
+    g.startWave();
+    const base = 1 / g.stats.weapon.rate;
+    const cd = () => { g.player.fireCd = 0; g.update(1 / 60, { ...idle, aimX: g.player.x + 100, aimY: g.player.y, fire: true }); return g.player.fireCd; };
+    expect(cd()).toBeCloseTo(base);
+    g.player.mana = 0;
+    for (let i = 0; i < 20; i++) {
+      const e = g.addEnemy('crawler', g.player.x + 300, g.player.y, 1);
+      e.spawnT = 0;
+      g.damageEnemy(e, 9999, 0, 0);
+    }
+    expect(g.combo).toBe(20);
+    expect(g.player.mana).toBeGreaterThan(20);
+    expect(cd()).toBeLessThan(base);
+    g.update(TUNING.combat.comboWindow + 0.5, idle);
+    expect(g.combo).toBe(0);
   });
 });

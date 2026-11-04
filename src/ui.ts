@@ -318,6 +318,13 @@ export class Ui {
     $('hpText').textContent = `${Math.ceil(p.hp)} / ${s.maxHp}`;
     $('manaFill').style.width = `${(p.mana / s.maxMana) * 100}%`;
     $('manaText').textContent = `${Math.floor(p.mana)} / ${s.maxMana}`;
+    const combo = $('combo');
+    const show = game.combo >= 3 && game.phase !== 'dead';
+    if (combo.hidden === show) combo.hidden = !show;
+    if (show) {
+      const text = `COMBO x${game.combo}`;
+      if (combo.textContent !== text) { combo.textContent = text; combo.classList.remove('bump'); void combo.offsetWidth; combo.classList.add('bump'); }
+    }
     $('waveNum').textContent = game.roaming ? 'ROAMING' : `WAVE ${game.wave}`;
     $('waveLeft').textContent = game.roaming ? `🌿 ${game.harvested} harvested` : game.phase === 'wave' ? `${game.enemiesLeft} left` : 'clear!';
     $('gold').textContent = `🟡 ${p.gold}`;

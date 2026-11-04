@@ -2,12 +2,13 @@ import './style.css';
 import { Sfx } from './audio';
 import { CHARACTERS } from './characters';
 import { deadTransport, reply, RtcHub, type Invite } from '../link/rtc';
-import { defaultPeer, frontProgress, handleEnvelope, heroState, joinUrl, makeLink, relayTransport, savePeer, type MoldLevels } from './coop';
+import { arenaView, defaultPeer, frontProgress, handleEnvelope, heroState, joinUrl, makeLink, relayTransport, savePeer, type MoldLevels } from './coop';
 import { qrSvg } from './qr';
 import { Controls } from './input';
 import { Renderer, loadImages } from './render';
 import { Game, type Enemy, type FrontSpec, type FrontState, type GameEvent, type Phase } from './sim';
 import { dlog, setupDebug } from './debug';
+import { TUNING } from './tuning';
 import { WarRoom } from './warroom';
 import { Ui, saveBest, type CoopInfo, type PairInfo } from './ui';
 
@@ -233,6 +234,11 @@ enemies ${game!.enemiesLeft} hp ${Math.round(game!.player.hp)}/${game!.stats.max
     overview: (o) => warroom.update(o),
     climate: (c) => renderer.weather.set(c), send: (t, b) => link.send(t, b) })) report(); });
   setInterval(() => { settleFront(); report(); }, 1000);
+  // the commander's zoomed view: a picture of the arena a few times a second (rocks only now and then)
+  let viewTick = 0;
+  setInterval(() => {
+    if (game && link.state === 'linked') link.send('arena.view', arenaView(game, viewTick++ % 24 === 0));
+  }, 1000 / TUNING.view.perSecond);
   window.addEventListener('beforeunload', () => link.leave());
 
   const controls = new Controls(

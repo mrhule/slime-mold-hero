@@ -33,6 +33,8 @@ export interface Spawn {
   kind: EnemyKind;
   /** seconds after the wave starts */
   delay: number;
+  /** enemies with the same number arrive together at one spot */
+  pack?: number;
 }
 
 /** what a spawn costs out of a front's nutrient pool (the boss has no wave budget cost of its own) */
@@ -47,11 +49,13 @@ export function isBossWave(wave: number): boolean {
 /** Decides what spawns when. A budget is spent on random affordable kinds; every fifth wave adds a boss. */
 export function planWave(wave: number, rng: () => number): Spawn[] {
   const t = TUNING.waves;
-  let budget = t.base + wave * t.perWave + wave * wave * t.perWaveSq;
+  const c = TUNING.combat;
+  let budget = (t.base + wave * t.perWave + wave * wave * t.perWaveSq) * c.budgetMul;
   if (isBossWave(wave)) budget *= t.bossShare;
   const avail = Object.values(ENEMIES).filter((d) => d.kind !== 'boss' && d.minWave <= wave);
-  const kinds: EnemyKind[] = [];
-  while (budget >= 1 && kinds.length < 90) {
+  const kinds: { kind: EnemyKind; pack?: number }[] = [];
+  let packs = 0;
+  while (budget >= 1 && kinds.length < 140) {
     const ok = avail.filter((d) => d.cost <= budget);
     if (!ok.length) break;
     let roll = rng() * ok.reduce((s, d) => s + d.weight, 0);
@@ -60,11 +64,24 @@ export function planWave(wave: number, rng: () => number): Spawn[] {
       roll -= d.weight;
       if (roll <= 0) { pick = d; break; }
     }
-    kinds.push(pick.kind);
     budget -= pick.cost;
+    // the small fast kinds like to come as a swarm from one direction
+    if (pick.cost === 1 && rng() < c.packChance) {
+      const n = Math.min(Math.floor(budget) + 1, c.packMin + Math.floor(rng() * (c.packMax - c.packMin + 1)));
+      const id = ++packs;
+      for (let i = 0; i < n; i++) kinds.push({ kind: pick.kind, pack: id });
+      budget -= n - 1;
+    } else {
+      kinds.push({ kind: pick.kind });
+    }
   }
-  const duration = Math.min(22, 8 + wave * 0.7);
-  const out: Spawn[] = kinds.map((kind) => ({ kind, delay: rng() * duration }));
+  const duration = Math.min(c.spanMax, c.spanBase + wave * c.spanPerWave);
+  const packAt = new Map<number, number>();
+  const out: Spawn[] = kinds.map(({ kind, pack }) => {
+    if (pack === undefined) return { kind, delay: rng() * duration };
+    if (!packAt.has(pack)) packAt.set(pack, rng() * duration);
+    return { kind, pack, delay: packAt.get(pack)! + rng() * 0.4 };
+  });
   if (isBossWave(wave)) out.push({ kind: 'boss', delay: 1 });
   out.sort((a, b) => a.delay - b.delay);
   if (out.length) out[0].delay = Math.min(out[0].delay, 0.8);

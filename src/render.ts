@@ -160,6 +160,8 @@ export class Renderer {
   autoTarget: { x: number; y: number; r: number } | null = null;
   /** the commander's weather, drawn over everything in the world */
   readonly weather = new WeatherFx();
+  /** 0 calm to 1 swamped: a red glow round the screen when the crowd closes in or health is low */
+  private danger = 0;
   /** show where to put each thumb until the player has used it */
   hints = { move: false, aim: false };
 
@@ -327,6 +329,7 @@ export class Renderer {
     for (const pool of game.pools) this.pool(pool, game.time);
     for (const m of game.markers) this.marker(m, game.time);
     for (const k of game.strikes) this.strike(k);
+    for (const d of game.defenses) this.defense(d, game.time);
     for (const l of game.lobs) this.lob(l, game);
     for (const k2 of game.pickups) if (vis(k2.x, k2.y)) this.pickup(k2, game.time);
     const sorted = [...game.enemies].sort((a, b) => a.y - b.y);
@@ -367,6 +370,7 @@ export class Renderer {
     ctx.restore();
 
     this.weather.draw(ctx, w, h, game.time);
+    this.drawDanger(game);
     // vignette and crosshair in screen space
     const v = this.imgs.vignette;
     ctx.globalAlpha = 0.4;
@@ -377,6 +381,54 @@ export class Renderer {
       if (this.touchMode) this.drawSticks();
       else this.crosshair();
     }
+  }
+
+  /** a wall or a turret the commander built */
+  private defense(d: Game['defenses'][number], t: number): void {
+    const { ctx } = this;
+    const hurt = 1 - d.hp / d.maxHp;
+    ctx.save();
+    ctx.translate(d.x, d.y);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(0, d.r * 0.55, d.r * 1.05, d.r * 0.5, 0, 0, TAU);
+    ctx.fill();
+    if (d.kind === 'wall') {
+      blob(ctx, 0, 0, d.r, t, d.id, 0.04);
+      ctx.fillStyle = d.flash > 0 ? '#fff3d0' : hurt > 0.6 ? '#8a6f4a' : '#b59a68';
+      ctx.fill();
+      ink(ctx, 4);
+      ctx.strokeStyle = 'rgba(60,40,20,0.55)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-d.r * 0.5, -d.r * 0.2); ctx.lineTo(d.r * 0.1, -d.r * 0.55);
+      ctx.moveTo(-d.r * 0.1, d.r * 0.5); ctx.lineTo(d.r * 0.55, d.r * 0.1);
+      ctx.stroke();
+    } else {
+      blob(ctx, 0, 0, d.r, t, d.id, 0.03);
+      ctx.fillStyle = d.flash > 0 ? '#fff3d0' : '#6c8a58';
+      ctx.fill();
+      ink(ctx, 4);
+      ctx.rotate(d.aim);
+      ctx.fillStyle = '#3d4a35';
+      ctx.fillRect(2, -5, d.r + 6, 10);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = INK;
+      ctx.strokeRect(2, -5, d.r + 6, 10);
+      ctx.rotate(-d.aim);
+      ctx.beginPath();
+      ctx.arc(0, 0, d.r * 0.35, 0, TAU);
+      ctx.fillStyle = '#c8e8a8';
+      ctx.fill();
+      ink(ctx, 2.5);
+    }
+    if (hurt > 0.02) {
+      ctx.fillStyle = '#1d211a';
+      ctx.fillRect(-d.r, d.r + 6, d.r * 2, 5);
+      ctx.fillStyle = hurt > 0.6 ? '#e04a3a' : '#7ddc52';
+      ctx.fillRect(-d.r, d.r + 6, d.r * 2 * (1 - hurt), 5);
+    }
+    ctx.restore();
   }
 
   /** the warning for commander artillery: a red ring closing in on the target */
@@ -452,6 +504,24 @@ export class Renderer {
       ink(ctx, 3);
       ctx.restore();
     }
+  }
+
+  private drawDanger(game: Game): void {
+    const { ctx, w, h } = this;
+    const p = game.player;
+    let close = 0;
+    for (const e of game.enemies) if (e.spawnT <= 0 && e.hp > 0 && Math.hypot(e.x - p.x, e.y - p.y) < 380) close++;
+    const crowd = Math.max(0, Math.min(1, (close - 6) / 16));
+    const hurt = Math.max(0, Math.min(1, (0.6 - p.hp / game.stats.maxHp) / 0.4));
+    const goal = game.phase === 'dead' ? 0 : Math.max(crowd * 0.85, hurt);
+    this.danger += (goal - this.danger) * 0.08;
+    if (this.danger < 0.02) return;
+    const pulse = 0.8 + 0.2 * Math.sin(game.time * (4 + 6 * this.danger));
+    const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.3, w / 2, h / 2, Math.hypot(w, h) * 0.6);
+    g.addColorStop(0, 'rgba(190,30,20,0)');
+    g.addColorStop(1, `rgba(190,30,20,${0.5 * this.danger * pulse})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
   }
 
   /** what the hero is about to shoot at, so a held thumb is never a guess */

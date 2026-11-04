@@ -45,10 +45,14 @@
       <div class="bar hp"><i id="pressBar"></i><span id="pressTxt"></span></div>
       <div id="ups"></div>
     </div>
-    <label><input type="checkbox" id="strikeMode"> Click the dish to call a strike (60 nutrients) instead of a marker</label>
     <div class="row"><label>Season <select id="season"><option>spring</option><option>summer</option><option>fall</option><option>winter</option></select></label>
       <label>Weather <select id="weather"><option>clear</option><option>rain</option><option>storm</option><option>fog</option><option>frost</option><option>snow</option><option>blizzard</option></select></label></div>
-    <canvas id="dish" width="300" height="300"></canvas>
+    <div class="row">
+      <label>Click does <select id="tool"><option value="marker">marker (free)</option><option value="strike">artillery strike</option><option value="turret">build turret</option><option value="wall">build wall</option></select></label>
+      <label>Zoom <input type="range" id="zoom" min="1" max="5" step="0.1" value="1"></label>
+      <span id="viewInfo">no view yet</span>
+    </div>
+    <canvas id="dish" width="560" height="560" style="max-width:100%"></canvas>
     <pre id="log"></pre>
     <script type="module" src="/commander/main.ts"></script>
   </body>

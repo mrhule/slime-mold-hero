@@ -4,7 +4,9 @@ import { RELAY_PATH } from '../link/relay-path';
 import { CHARACTERS } from './characters';
 import { dlog } from './debug';
 import { parseClimate } from './weather';
+import { ENEMIES } from './enemies';
 import type { FrontSpec, Game } from './sim';
+import { TUNING } from './tuning';
 import { UPGRADES, emptyLevels, type Levels } from './upgrades';
 
 /**
@@ -137,6 +139,14 @@ export function handleEnvelope(env: Envelope, ctx: HeroCtx): boolean {
       if (ctx.game && x !== null && y !== null) ctx.game.addStrike(x, y);
       return false;
     }
+    case 'defend': {
+      const x = num(b.x);
+      const y = num(b.y);
+      if (x === null || y === null || (b.kind !== 'turret' && b.kind !== 'wall')) return false;
+      const ok = !!ctx.game && ctx.game.addDefense(b.kind, x, y);
+      ctx.send('defend.result', { kind: b.kind, x, y, ok });
+      return false;
+    }
     case 'climate': {
       const c = parseClimate(b);
       if (c) ctx.climate?.(c);
@@ -153,6 +163,25 @@ export function handleEnvelope(env: Envelope, ctx: HeroCtx): boolean {
     default:
       return false;
   }
+}
+
+const KIND_INDEX = Object.keys(ENEMIES);
+
+/** the arena as numbers, for the commander's zoomed view; `full` adds the rocks, which never change */
+export function arenaView(game: Game, full: boolean): Messages['arena.view'] {
+  const r = (n: number) => Math.round(n);
+  const view: Messages['arena.view'] = {
+    front: game.front?.spec.id ?? null,
+    hero: { x: r(game.player.x), y: r(game.player.y), hp: Math.round((game.player.hp / game.stats.maxHp) * 100) / 100, aim: Math.round(game.player.aim * 100) / 100 },
+    maxHp: game.stats.maxHp,
+    enemies: game.enemies.filter((e) => e.hp > 0 && e.spawnT <= 0).slice(0, TUNING.view.maxEnemies).map((e) => [r(e.x), r(e.y), Math.max(0, KIND_INDEX.indexOf(e.kind)), Math.round((e.hp / e.maxHp) * 100)]),
+    strikes: game.strikes.map((k) => [r(k.x), r(k.y), r(k.r), Math.round(Math.min(1, k.t / k.delay) * 100)]),
+    defenses: game.defenses.map((d) => [d.kind === 'turret' ? 1 : 0, r(d.x), r(d.y), Math.round((d.hp / d.maxHp) * 100)]),
+    drops: game.pickups.filter((k) => k.kind === 'nutrient').map((k) => [r(k.x), r(k.y)]),
+    markers: game.markers.map((m) => [r(m.x), r(m.y)]),
+  };
+  if (full) view.obstacles = game.obstacles.map((o) => [r(o.x), r(o.y), r(o.r)]);
+  return view;
 }
 
 /** the war-room data, trimmed to what the map draws; null if it is not shaped right */

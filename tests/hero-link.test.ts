@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Envelope, Messages } from '../link/protocol';
 import { CHARACTERS } from '../src/characters';
-import { frontProgress, handleEnvelope, heroState, type HeroCtx, type MoldLevels } from '../src/coop';
+import { arenaView, frontProgress, handleEnvelope, heroState, type HeroCtx, type MoldLevels } from '../src/coop';
 import { TUNING } from '../src/tuning';
 import { Game, type FrontSpec, type Input } from '../src/sim';
 
@@ -183,6 +183,7 @@ describe('artillery, bounty and the war room', () => {
     const near = g.addEnemy('crawler', 1700, 1400, 1);
     const far = g.addEnemy('crawler', 1000, 1400, 1);
     near.spawnT = far.spawnT = 0;
+    near.speed = far.speed = 0; // hold still, so the test is about the ring and not how fast they walk
     handleEnvelope(env('strike', { x: 1700, y: 1400 }), c);
     expect(g.strikes).toHaveLength(1);
     g.update(0.5, idle);
@@ -256,6 +257,93 @@ describe('weather from the commander', () => {
       { season: 'winter', weather: 'blizzard', intensity: 1 },
       { season: 'fall', weather: 'rain', intensity: 0.5 },
     ]);
+  });
+});
+
+describe('the commander builds and watches', () => {
+  const spec: FrontSpec = { id: 'f9', seed: 2, pool: 40, tier: 1, pressure: 0.5 };
+
+  it('builds walls and turrets on request, and says so', () => {
+    const { c, sent } = ctx(new Game(CHARACTERS[0], 1));
+    const g = c.game!;
+    g.startWave();
+    g.obstacles = []; // no rock in the way of the spots this test picks
+    g.queueClear();
+    handleEnvelope(env('defend', { kind: 'wall', x: 1700, y: 1400 }), c);
+    handleEnvelope(env('defend', { kind: 'turret', x: 1700, y: 1700 }), c);
+    expect(g.defenses.map((d) => d.kind)).toEqual(['wall', 'turret']);
+    expect(sent.filter((s) => s.type === 'defend.result').map((s) => (s.body as { ok: boolean }).ok)).toEqual([true, true]);
+  });
+
+  it('refuses a bad spot, a full arena, and anything malformed', () => {
+    const { c, sent } = ctx(new Game(CHARACTERS[0], 1));
+    const g = c.game!;
+    g.startWave();
+    g.obstacles = [];
+    g.queueClear();
+    expect(g.addDefense('wall', g.player.x + 10, g.player.y)).toBe(false); // on top of the hero
+    expect(g.addDefense('wall', 5000, 5000)).toBe(false); // outside the dish
+    expect(g.addDefense('wall', NaN, 3)).toBe(false);
+    expect(g.addDefense('turret', 1700, 1400)).toBe(true);
+    expect(g.addDefense('wall', 1705, 1400)).toBe(false); // overlapping
+    for (let i = 0; i < 20; i++) g.addDefense('wall', 1500 + (i % 5) * 120, 900 + Math.floor(i / 5) * 120);
+    expect(g.defenses.length).toBeLessThanOrEqual(TUNING.defense.max);
+    handleEnvelope(env('defend', { kind: 'laser', x: 1, y: 2 }), c);
+    expect(sent.some((s) => (s.body as { kind?: string }).kind === 'laser')).toBe(false);
+  });
+
+  it('a turret shoots enemies in range, and enemies wear a wall down until it falls', () => {
+    const g = new Game(CHARACTERS[0], 1);
+    g.startWave();
+    g.queueClear();
+    g.addDefense('turret', 1700, 1400);
+    const e = g.addEnemy('brute', 1900, 1400, 1);
+    e.spawnT = 0;
+    e.speed = 0;
+    const hp = e.hp;
+    for (let i = 0; i < 60; i++) g.update(1 / 30, idle);
+    expect(e.hp).toBeLessThan(hp);
+
+    const h = new Game(CHARACTERS[0], 2);
+    h.startWave();
+    h.queueClear();
+    h.addDefense('wall', 1700, 1400);
+    const w = h.defenses[0];
+    const brute = h.addEnemy('brute', 1700 + w.r + 30, 1400, 1);
+    brute.spawnT = 0;
+    brute.speed = 0;
+    brute.hp = brute.maxHp = 1e9;
+    h.player.hp = h.stats.maxHp = 1e9;
+    for (let i = 0; i < 30 * 40 && h.defenses.length; i++) h.update(1 / 30, idle);
+    expect(h.defenses).toHaveLength(0);
+  });
+
+  it('defenses block walking, so a wall holds the crowd off', () => {
+    const g = new Game(CHARACTERS[0], 4);
+    g.startWave();
+    g.queueClear();
+    g.addDefense('wall', 1500, 1400);
+    g.player.x = 1400;
+    for (let i = 0; i < 60; i++) g.update(1 / 30, { ...idle, moveX: 1 });
+    expect(g.player.x).toBeLessThan(1500);
+  });
+
+  it('describes the arena in numbers, small enough to send', () => {
+    const g = new Game(CHARACTERS[0], 3);
+    g.openFront(spec);
+    g.startWave();
+    g.update(20, idle);
+    g.addDefense('wall', 1700, 1400);
+    g.addStrike(1500, 1500);
+    const v = arenaView(g, true);
+    expect(v.front).toBe('f9');
+    expect(v.hero.hp).toBeGreaterThan(0);
+    expect(v.enemies.every((e) => e.length === 4)).toBe(true);
+    expect(v.defenses).toEqual([[0, 1700, 1400, 100]]);
+    expect(v.strikes).toHaveLength(1);
+    expect(v.obstacles!.length).toBeGreaterThan(5);
+    expect(JSON.stringify(v).length).toBeLessThan(12000);
+    expect(arenaView(g, false).obstacles).toBeUndefined();
   });
 });
 

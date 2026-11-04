@@ -225,3 +225,9 @@ body.linked #mapBtn:not([hidden]) { display: block; }
 .peer input { width: min(260px, 70vw); background: #11140e; color: var(--gold); border: 3px solid var(--ink); font: 14px ui-monospace, Consolas, monospace; padding: 4px 6px; }
 #fsBtn { top: calc(max(12px, env(safe-area-inset-top)) + 140px); font-size: 22px; }
 #fsBtn[hidden] { display: none !important; }
+
+.combo { position: absolute; top: 74px; left: 50%; transform: translateX(-50%); font: 26px var(--font); letter-spacing: 2px; color: #ffb347; text-shadow: 3px 3px 0 var(--ink), -1px -1px 0 var(--ink), 1px -1px 0 var(--ink), -1px 1px 0 var(--ink); pointer-events: none; }
+.combo[hidden] { display: none; }
+.combo.bump { animation: bump 0.18s ease-out; }
+@keyframes bump { from { transform: translateX(-50%) scale(1.35); } to { transform: translateX(-50%) scale(1); } }
+body.touch .combo { top: 52px; font-size: 20px; }

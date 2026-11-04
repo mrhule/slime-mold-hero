@@ -1,5 +1,5 @@
 import type { CharacterDef } from './characters';
-import { BOSS_SPRITES, ENEMIES, planWave, spawnCost, type EnemyKind, type Spawn } from './enemies';
+import { BOSS_SPRITES, ENEMIES, isBossWave, planWave, spawnCost, type EnemyKind, type Spawn } from './enemies';
 import { mulberry32 } from './rng';
 import { TUNING } from './tuning';
 import { UPGRADES, derive, emptyLevels, upgradeCost, type Derived, type Levels } from './upgrades';
@@ -41,6 +41,9 @@ export interface Lob { sx: number; sy: number; tx: number; ty: number; t: number
 export interface Blast { x: number; y: number; r: number; t: number; max: number; color: string }
 export interface Particle { x: number; y: number; vx: number; vy: number; life: number; max: number; size: number; color: string }
 export interface Floater { x: number; y: number; text: string; t: number; color: string; big: boolean }
+/** something the commander built in the arena: a wall that blocks, or a turret that shoots */
+export interface Defense { id: number; kind: 'turret' | 'wall'; x: number; y: number; r: number; hp: number; maxHp: number; cd: number; aim: number; flash: number }
+
 export interface Marker { x: number; y: number; label: string; t: number; life: number }
 export interface Splat { x: number; y: number; r: number; color: string }
 
@@ -105,6 +108,9 @@ export class Game {
   markers: Marker[] = [];
   /** artillery the commander has called in */
   strikes: Strike[] = [];
+  /** walls and turrets the commander has built here */
+  defenses: Defense[] = [];
+  private defenseId = 1;
   /** drained by the renderer each frame */
   splats: Splat[] = [];
   phase: Phase = 'shop';
@@ -130,6 +136,13 @@ export class Game {
   onEvent: (e: GameEvent) => void = () => {};
   private queue: Spawn[] = [];
   private waveTime = 0;
+  /** enemies planned for the current wave, to tell when it is nearly over */
+  private waveSize = 0;
+  /** where each pack of this wave appeared */
+  private packAt = new Map<number, { x: number; y: number }>();
+  /** kills in a row, building a fire-rate bonus while they keep coming */
+  combo = 0;
+  comboT = 0;
   private nextId = 1;
   private bossIndex = 0;
 
@@ -191,6 +204,66 @@ export class Game {
     this.strikes = this.strikes.filter((k) => k.t < k.delay);
   }
 
+  /**
+   * The commander builds in the arena. Refused (false) when the spot is outside the dish, on a rock, the hero or another
+   * defense, or when too many are standing; the commander then gets its nutrients back.
+   */
+  addDefense(kind: 'turret' | 'wall', x: number, y: number): boolean {
+    const t = TUNING.defense;
+    if ((kind !== 'turret' && kind !== 'wall') || !Number.isFinite(x) || !Number.isFinite(y) || this.phase === 'dead') return false;
+    if (this.defenses.length >= t.max) return false;
+    const r = kind === 'turret' ? t.turretRadius : t.wallRadius;
+    if (Math.hypot(x - CENTER.x, y - CENTER.y) > ARENA_R - 80 - r) return false;
+    if (this.blocked(x, y, r)) return false;
+    if (Math.hypot(x - this.player.x, y - this.player.y) < this.player.r + r + 8) return false;
+    if (this.defenses.some((d) => Math.hypot(d.x - x, d.y - y) < d.r + r + 4)) return false;
+    if (this.enemies.some((e) => e.hp > 0 && Math.hypot(e.x - x, e.y - y) < e.r + r)) return false;
+    const hp = kind === 'turret' ? t.turretHp : t.wallHp;
+    this.defenses.push({ id: this.defenseId++, kind, x, y, r, hp, maxHp: hp, cd: 0.5, aim: 0, flash: 0 });
+    this.blasts.push({ x, y, r: r * 1.6, t: 0, max: 0.35, color: '#9fe08a' });
+    this.onEvent('buy');
+    return true;
+  }
+
+  private updateDefenses(dt: number): void {
+    const t = TUNING.defense;
+    for (const d of this.defenses) {
+      d.flash -= dt;
+      for (const e of this.enemies) {
+        if (e.hp <= 0 || e.spawnT > 0) continue;
+        if (Math.hypot(e.x - d.x, e.y - d.y) < e.r + d.r + 6) {
+          d.hp -= e.damage * t.contactDps * dt;
+          d.flash = 0.1;
+        }
+      }
+      if (d.kind !== 'turret') continue;
+      d.cd -= dt;
+      let best: Enemy | null = null;
+      let bd = t.turretRange;
+      for (const e of this.enemies) {
+        if (e.hp <= 0 || e.spawnT > 0) continue;
+        const dist = Math.hypot(e.x - d.x, e.y - d.y);
+        if (dist < bd) { bd = dist; best = e; }
+      }
+      if (!best) continue;
+      d.aim = Math.atan2(best.y - d.y, best.x - d.x);
+      if (d.cd > 0) continue;
+      d.cd = 1 / t.turretRate;
+      const sx = d.x + Math.cos(d.aim) * (d.r + 4);
+      const sy = d.y + Math.sin(d.aim) * (d.r + 4);
+      this.bullets.push({
+        x: sx, y: sy, px: sx, py: sy, vx: Math.cos(d.aim) * t.turretBulletSpeed, vy: Math.sin(d.aim) * t.turretBulletSpeed, r: 5,
+        damage: t.turretDamage * (1 + 0.04 * (this.wave - 1)), life: t.turretRange / t.turretBulletSpeed, pierce: 0, hit: [], friendly: true,
+      });
+    }
+    for (const d of this.defenses) {
+      if (d.hp > 0) continue;
+      this.blasts.push({ x: d.x, y: d.y, r: d.r * 2, t: 0, max: 0.4, color: '#c9b27a' });
+      for (let i = 0; i < 14; i++) this.spark(d.x, d.y, '#c9b27a', 60 + this.rng() * 200);
+    }
+    this.defenses = this.defenses.filter((d) => d.hp > 0);
+  }
+
   /** what the commander keeps from this front so far */
   get loot(): FrontLoot {
     const f = this.front;
@@ -213,6 +286,8 @@ export class Game {
     this.waveTime = 0;
     this.queue = planWave(this.front ? this.front.spec.tier + this.wave - 1 : this.wave, this.rng);
     if (this.front) this.queue = this.spendPool(this.queue, this.front);
+    this.waveSize = this.queue.length;
+    this.packAt.clear();
     this.player.hp = Math.min(this.stats.maxHp, this.player.hp);
     this.onEvent('waveStart');
   }
@@ -255,6 +330,13 @@ export class Game {
       this.pickups.push({ x, y, vx: 0, vy: 0, kind: 'nutrient', value: t.dropValue, t: 0 });
       return;
     }
+  }
+
+  /** for tests: no waves and no chaining, so a test controls who is on the field */
+  queueClear(): void {
+    this.queue = [];
+    this.enemies = [];
+    this.waveSize = 1e9;
   }
 
   /** open this game as a front: the linked, endless waves become a fight over a nutrient pool */
@@ -370,11 +452,15 @@ export class Game {
     this.updateLobs(dt);
     this.updatePools(dt);
     this.updateStrikes(dt);
+    this.updateDefenses(dt);
     if (this.roaming) this.updateDrops(dt);
     this.updatePickups(dt);
     this.enemies = this.enemies.filter((e) => e.hp > 0);
 
+    this.comboT -= dt;
+    if (this.comboT <= 0) this.combo = 0;
     if (this.phase === 'wave' && !this.roaming && this.queue.length === 0 && this.enemies.length === 0) this.endWave();
+    else if (this.shouldChain()) this.chainWave();
     else if (this.phase === 'clear') {
       this.clearT -= dt;
       if (this.clearT <= 0) {
@@ -385,9 +471,28 @@ export class Game {
     }
   }
 
+  /** Waves run into each other: when the current one is nearly beaten the next starts, so there is always more coming. */
+  private shouldChain(): boolean {
+    if (this.phase !== 'wave' || this.roaming || this.queue.length > 0 || isBossWave(this.wave)) return false;
+    if (this.front && this.front.pool < 1) return false; // nothing left to send: let it end
+    if (!this.linked && this.wave % TUNING.combat.shopEvery === 0) return false; // the shop comes after this one
+    return this.enemies.length <= Math.max(3, TUNING.combat.overlapAt * this.waveSize);
+  }
+
+  private chainWave(): void {
+    this.wave++;
+    this.waveTime = 0;
+    this.queue = planWave(this.front ? this.front.spec.tier + this.wave - 1 : this.wave, this.rng);
+    if (this.front) this.queue = this.spendPool(this.queue, this.front);
+    this.waveSize = this.queue.length;
+    this.packAt.clear();
+    this.player.hp = Math.min(this.stats.maxHp, this.player.hp + this.stats.maxHp * TUNING.combat.chainHeal);
+    this.onEvent('waveStart');
+  }
+
   private endWave(): void {
     this.phase = 'clear';
-    this.clearT = 1.6;
+    this.clearT = TUNING.combat.clearSeconds;
     this.bullets = this.bullets.filter((b) => b.friendly);
     this.lastClearBonus = this.linked ? 0 : 10 + 5 * this.wave;
     this.player.gold += this.lastClearBonus;
@@ -430,7 +535,7 @@ export class Game {
   private shoot(): void {
     const p = this.player;
     const w = this.stats.weapon;
-    p.fireCd = 1 / w.rate;
+    p.fireCd = 1 / (w.rate * (1 + Math.min(TUNING.combat.comboCap, this.combo * TUNING.combat.comboRate)));
     p.recoil = 4;
     // an enemy already in the muzzle zone would be behind the bullet's first step, so start the shot inside the hero
     const close = this.enemies.some((e) => {
@@ -523,7 +628,12 @@ export class Game {
     while (this.queue.length && this.queue[0].delay <= this.waveTime) {
       if (this.enemies.length >= 110) { this.queue[0].delay = this.waveTime + 0.5; break; }
       const s = this.queue.shift()!;
-      const pos = this.spawnPoint();
+      let pos = this.spawnPoint();
+      if (s.pack !== undefined) {
+        const at = this.packAt.get(s.pack);
+        if (at) pos = { x: at.x + (this.rng() - 0.5) * 90, y: at.y + (this.rng() - 0.5) * 90 };
+        else this.packAt.set(s.pack, pos);
+      }
       this.addEnemy(s.kind, pos.x, pos.y, 1);
     }
     void dt;
@@ -533,7 +643,7 @@ export class Game {
     const p = this.player;
     for (let i = 0; i < 40; i++) {
       const a = this.rng() * Math.PI * 2;
-      const d = 620 + this.rng() * 220;
+      const d = TUNING.combat.spawnMin + this.rng() * TUNING.combat.spawnSpan;
       const x = p.x + Math.cos(a) * d;
       const y = p.y + Math.sin(a) * d;
       if (Math.hypot(x - CENTER.x, y - CENTER.y) < ARENA_R - 70 && !this.blocked(x, y, 30)) return { x, y };
@@ -561,7 +671,7 @@ export class Game {
     }
     const e: Enemy = {
       id: this.nextId++, kind, x, y, vx: 0, vy: 0, kx: 0, ky: 0, r: def.radius * (hpScale < 1 ? 0.8 : 1),
-      hp, maxHp: hp, speed: def.speed * Math.min(1.35, 1 + 0.012 * w) * (0.9 + this.rng() * 0.2),
+      hp, maxHp: hp, speed: def.speed * Math.min(1.35, 1 + 0.012 * w) * TUNING.combat.speedMul * (0.9 + this.rng() * 0.2),
       damage: def.damage * (1 + 0.05 * (w - 1)), gold: def.gold, flash: 0, t: this.rng() * 10, atkCd: 0.4,
       cd: 1 + this.rng() * 1.5, cd2: 6, slow: 0, spawnT: 0.6, sprite, face: 1,
     };
@@ -681,6 +791,9 @@ export class Game {
   private killEnemy(e: Enemy): void {
     const def = ENEMIES[e.kind];
     this.kills++;
+    this.combo++;
+    this.comboT = TUNING.combat.comboWindow;
+    this.player.mana = Math.min(this.stats.maxMana, this.player.mana + TUNING.combat.manaPerKill);
     if (this.front) {
       this.front.bounty += e.kind === 'boss' ? TUNING.feedback.bountyBoss : Math.round(spawnCost(e.kind) * TUNING.feedback.bountyPerCost);
       if (e.kind === 'boss') this.front.bosses++;
@@ -696,7 +809,7 @@ export class Game {
       const v = Math.floor(value / drops) + (i < value % drops ? 1 : 0);
       if (v > 0) this.pickups.push({ x: e.x, y: e.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, kind: 'gold', value: v, t: 0 });
     }
-    if (this.rng() < (e.kind === 'boss' ? 1 : 0.05)) this.pickups.push({ x: e.x, y: e.y, vx: 0, vy: 0, kind: 'heal', value: this.stats.maxHp * 0.12, t: 0 });
+    if (this.rng() < (e.kind === 'boss' ? 1 : TUNING.combat.healDrop)) this.pickups.push({ x: e.x, y: e.y, vx: 0, vy: 0, kind: 'heal', value: this.stats.maxHp * 0.12, t: 0 });
     if (e.kind === 'splitter') {
       for (let i = 0; i < 2; i++) {
         const c = this.addEnemy('crawler', e.x + (i ? 14 : -14), e.y, 0.5);
@@ -798,7 +911,7 @@ export class Game {
 
   /** push a circle out of rocks and the dish wall */
   private collide(o: { x: number; y: number }, r: number): void {
-    for (const ob of this.obstacles) {
+    for (const ob of [...this.obstacles, ...this.defenses]) {
       const dx = o.x - ob.x;
       const dy = o.y - ob.y;
       const min = ob.r + r;
