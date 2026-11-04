@@ -33,6 +33,13 @@ export interface Spawn {
   delay: number;
 }
 
+/** what a spawn costs out of a front's nutrient pool (the boss has no wave budget cost of its own) */
+export const BOSS_POOL_COST = 20;
+
+export function spawnCost(kind: EnemyKind): number {
+  return kind === 'boss' ? BOSS_POOL_COST : ENEMIES[kind].cost;
+}
+
 export function isBossWave(wave: number): boolean {
   return wave % 5 === 0;
 }

@@ -175,3 +175,12 @@ body.touch .pill { top: calc(max(12px, env(safe-area-inset-top)) + 54px); font-s
 .coop .peers { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; font-size: 18px; }
 .coop .err { margin: 0; color: #ff8a7a; font-weight: 600; }
 @media (max-height: 520px) { .coop .code { font-size: 44px; } .coop .sub { display: block; font-size: 13px; } }
+
+/* medals: upgrade levels worn by the hero */
+.medals { position: absolute; top: calc(max(12px, env(safe-area-inset-top)) + 98px); left: max(16px, env(safe-area-inset-left)); display: flex; flex-wrap: wrap; gap: 4px; max-width: min(320px, 40vw); }
+.medal { display: inline-flex; align-items: center; gap: 2px; font: 13px var(--font); color: var(--gold); background: #1d211a; border: 2px solid var(--ink); box-shadow: 2px 2px 0 var(--ink); padding: 0 5px; }
+.medal b { font-weight: normal; }
+body.touch .medals { top: calc(max(12px, env(safe-area-inset-top)) + 80px); }
+body.touch .medal { font-size: 11px; padding: 0 3px; }
+body.linked #gold { display: none; }
+body:not(.linked) .pill + .medals { top: calc(max(12px, env(safe-area-inset-top)) + 70px); }

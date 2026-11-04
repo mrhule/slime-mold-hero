@@ -1,5 +1,7 @@
 import { Link, WebSocketTransport } from '../link/client';
+import type { Messages } from '../link/protocol';
 import { RELAY_PATH } from '../link/relay-path';
+import { UPGRADES, upgradeCost } from '../src/upgrades';
 
 /** A throwaway commander: proves the link end to end before Slime Mold has its own side. */
 const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${RELAY_PATH}`;
@@ -29,8 +31,11 @@ const refresh = () => {
   $('status').textContent = link.state === 'solo' ? 'Solo' : `${link.state} · room ${link.code}${peers ? ' · ' + peers : ''}`;
   if (link.error) $('status').textContent += ` · ${link.error}`;
 };
-link.onState((s) => { log(`state: ${s}`); refresh(); });
+link.onState((s) => { log(`state: ${s}`); refresh(); renderPanel(); });
 link.onMessage((e) => {
+  if (e.type === 'hero.state') { hero = e.body as Messages['hero.state']; renderPanel(); return; }
+  if (e.type === 'front.progress') { const p = e.body as Messages['front.progress']; if (p.id === front?.id) { front.progress = p; renderPanel(); } return; }
+  if (e.type === 'front.result') { const r = e.body as Messages['front.result']; log(`front ${r.id}: ${r.outcome}, ${r.kills} kills`); if (r.id === front?.id) { front.outcome = r.outcome; renderPanel(); } return; }
   if (e.type === 'pong') log(`pong ${Math.round(performance.now() - (e.body as { t: number }).t)} ms`);
   else log(`${e.role} sent ${e.type}`);
 });
@@ -51,6 +56,70 @@ canvas.addEventListener('pointerdown', (e) => {
   ctx.arc((x / ARENA) * 300, (y / ARENA) * 300, 5, 0, Math.PI * 2);
   ctx.fill();
 });
+/** the commander's side of the economy: a made-up pool of nutrients that trickles in */
+let nutrients = 600;
+let hero: Messages['hero.state'] | null = null;
+/** an open front costs the commander too: nutrients drain every second until it is decided; at zero the front collapses */
+const FRONT_DRAIN = 4;
+let fronts = 0;
+let front: { id: string; progress: Messages['front.progress'] | null; outcome: string | null } | null = null;
+setInterval(() => {
+  nutrients += 15;
+  if (front && !front.outcome) {
+    nutrients = Math.max(0, nutrients - FRONT_DRAIN);
+    if (nutrients === 0) { link.send('front.recall', { id: front.id }); log('out of nutrients: the front collapses'); }
+  }
+  renderPanel();
+}, 1000);
+
+function renderPanel(): void {
+  $('panel').hidden = link.state !== 'linked';
+  if (link.state !== 'linked') return;
+  $('nutrients').textContent = `Nutrients ${Math.floor(nutrients)}`;
+  ($('healBtn') as HTMLButtonElement).disabled = !hero || nutrients < 40;
+  ($('manaBtn') as HTMLButtonElement).disabled = !hero || nutrients < 30;
+  const open = !!front && !front.outcome;
+  ($('frontBtn') as HTMLButtonElement).disabled = open; // a hero waiting on the title screen can be deployed too
+  ($('recallBtn') as HTMLButtonElement).disabled = !open;
+  const p = front?.progress;
+  $('frontInfo').textContent = !front ? 'No front open' : front.outcome ? `${front.id}: ${front.outcome}` : p ? `${front.id} · wave ${p.wave} · ${p.kills} kills · rival has ${Math.round(p.pool * 100)}%` : `${front.id} · deploying…`;
+  $('pressBar').style.width = `${(p?.pressure ?? 0) * 100}%`;
+  $('pressTxt').textContent = p && open ? `Pressure ${Math.round(p.pressure * 100)}%${p.pressure > 0.7 ? ' · DANGER' : ''}` : '';
+  if (!hero) { $('heroInfo').textContent = 'Waiting for the hero…'; return; }
+  $('heroInfo').textContent = `${hero.mold} · wave ${hero.wave}`;
+  $('hpBar').style.width = `${(hero.hp / hero.maxHp) * 100}%`;
+  $('hpTxt').textContent = `HP ${hero.hp} / ${hero.maxHp}`;
+  $('manaBar').style.width = `${(hero.mana / hero.maxMana) * 100}%`;
+  $('manaTxt').textContent = `Mana ${hero.mana} / ${hero.maxMana}`;
+  $('ups').innerHTML = UPGRADES.map((u) => {
+    const lv = hero!.levels[u.id] ?? 0;
+    const cost = lv >= u.max ? null : upgradeCost(u, lv);
+    const dis = cost === null || nutrients < cost ? 'disabled' : '';
+    return `<div class="up"><span>${u.icon} ${u.name} <small>${lv}/${u.max}</small></span><button data-up="${u.id}" ${dis}>${cost === null ? 'MAX' : cost}</button></div>`;
+  }).join('');
+}
+
+/** the commander pays first, then tells the hero */
+$('ups').addEventListener('click', (e) => {
+  const id = (e.target as HTMLElement).closest<HTMLElement>('[data-up]')?.dataset.up;
+  const def = UPGRADES.find((u) => u.id === id);
+  if (!hero || !def) return;
+  const lv = hero.levels[def.id] ?? 0;
+  if (lv >= def.max || nutrients < upgradeCost(def, lv)) return;
+  nutrients -= upgradeCost(def, lv);
+  hero.levels[def.id] = lv + 1;
+  link.send('upgrade', { mold: hero.mold, id: def.id, level: lv + 1 });
+  renderPanel();
+});
+$('frontBtn').addEventListener('click', () => {
+  front = { id: `F${++fronts}`, progress: null, outcome: null };
+  link.send('front.open', { id: front.id, seed: Math.floor(Math.random() * 1e9), pool: 60, tier: 1, pressure: 0.5 });
+  renderPanel();
+});
+$('recallBtn').addEventListener('click', () => { if (front) link.send('front.recall', { id: front.id }); });
+$('healBtn').addEventListener('click', () => { if (hero && nutrients >= 40) { nutrients -= 40; link.send('supply', { health: 0.4, mana: 0 }); renderPanel(); } });
+$('manaBtn').addEventListener('click', () => { if (hero && nutrients >= 30) { nutrients -= 30; link.send('supply', { health: 0, mana: 1 }); renderPanel(); } });
+
 const joinCode = new URLSearchParams(location.search).get('join');
 if (joinCode) { $<HTMLInputElement>('code').value = joinCode; void link.join(joinCode).catch(refresh); }
 (window as unknown as { __link: Link }).__link = link;

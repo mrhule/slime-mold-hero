@@ -51,6 +51,20 @@ export interface Messages {
   /** round trip check */
   ping: { t: number };
   pong: { t: number };
+  /** commander -> hero: the commander bought this upgrade for that mold; the hero applies the new level */
+  upgrade: { mold: string; id: string; level: number };
+  /** commander -> hero: the commander spent nutrients to restore a fraction of the hero's health and mana (0 to 1) */
+  supply: { health: number; mana: number };
+  /** hero -> commander: what the commander's hero panel shows. Sent when something changes and about once a second. */
+  /** commander -> hero: deploy to a front. The pool, tier and pressure come from the war at that front. */
+  'front.open': { id: string; seed: number; pool: number; tier: number; pressure: number };
+  /** commander -> hero: retreat; the hero has a short countdown to disengage */
+  'front.recall': { id: string };
+  /** hero -> commander: how the fight is going, about once a second. pressure 0 (ours) to 1 (rival's); pool is the share of the rival's nutrients left. */
+  'front.progress': { id: string; wave: number; kills: number; hp: number; pressure: number; pool: number };
+  /** hero -> commander: the front is decided */
+  'front.result': { id: string; outcome: 'won' | 'lost' | 'recalled'; kills: number };
+  'hero.state': { mold: string; wave: number; hp: number; maxHp: number; mana: number; maxMana: number; levels: Record<string, number> };
 }
 
 const CODE_LETTERS = 'ABCDEFGHJKMNPQRSTUVWXYZ';
