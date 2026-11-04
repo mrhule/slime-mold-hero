@@ -34,6 +34,18 @@ export const TUNING = {
     /** how far the hero's view reveals fog around the front, in map units */
     revealRadius: 160,
   },
+  roam: {
+    /** seconds between new nutrient drops while the hero has no front */
+    dropEvery: 6,
+    /** most drops lying around at once */
+    maxDrops: 6,
+    /** nutrients in one drop, paid to the commander when the hero picks it up */
+    dropValue: 4,
+    /** a drop nobody picks up fades after this many seconds */
+    dropLife: 60,
+    /** drops land at least this far from the hero */
+    minDistance: 300,
+  },
   strike: {
     /** commander price and cooldown (the real game enforces these) */
     cost: 60,

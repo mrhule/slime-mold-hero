@@ -70,6 +70,8 @@ export function heroState(game: Game): Messages['hero.state'] {
   return {
     mold: game.ch.id,
     wave: game.wave,
+    harvested: game.harvested,
+    roaming: game.roaming,
     hp: Math.round(game.player.hp),
     maxHp: s.maxHp,
     mana: Math.round(game.player.mana),

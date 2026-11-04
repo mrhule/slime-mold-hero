@@ -45,7 +45,9 @@ async function main(): Promise<void> {
     deadTimer = 0;
     ui.showHud(true);
     ui.hide();
-    game.startWave();
+    // linked with no front to fight: wander and harvest; otherwise the waves start
+    if (isLinked() && !front) game.startRoam();
+    else game.startWave();
     if (controls.touchMode) void document.documentElement.requestFullscreen?.().catch(() => {});
   };
 
@@ -193,11 +195,18 @@ enemies ${game!.enemiesLeft} hp ${Math.round(game!.player.hp)}/${game!.stats.max
     dlog('front.result', { id: f.spec.id, outcome: f.result, kills: game.kills, wave: game.wave, loot: game.loot });
     if (f.result === 'lost') return;
     ui.banner(f.result === 'won' ? 'FRONT HELD' : 'RECALLED', f.result === 'won');
-    setTimeout(() => { if (game?.front === f) { game = null; ui.showHud(false); ui.showSelect(); } }, 2500);
+    // back to wandering, ready for the next front
+    setTimeout(() => {
+      if (game?.front !== f) return;
+      if (isLinked()) start(charId);
+      else { game = null; ui.showHud(false); ui.showSelect(); }
+    }, 2500);
   };
   const syncLinked = () => {
     document.body.classList.toggle('linked', isLinked());
     if (game) game.linked = isLinked();
+    if (game?.roaming && !isLinked()) game.endRoam(); // the commander left: ordinary waves again
+    if (link.state === 'linked' && game && !game.front && !game.roaming) game.startRoam(); // a commander joined a game in progress
     if (link.state === 'solo') for (const k of Object.keys(molds)) delete molds[k];
     if (link.state === 'linked' && game) { molds[game.ch.id] = { ...game.levels }; report(); }
   };

@@ -318,8 +318,8 @@ export class Ui {
     $('hpText').textContent = `${Math.ceil(p.hp)} / ${s.maxHp}`;
     $('manaFill').style.width = `${(p.mana / s.maxMana) * 100}%`;
     $('manaText').textContent = `${Math.floor(p.mana)} / ${s.maxMana}`;
-    $('waveNum').textContent = `WAVE ${game.wave}`;
-    $('waveLeft').textContent = game.phase === 'wave' ? `${game.enemiesLeft} left` : 'clear!';
+    $('waveNum').textContent = game.roaming ? 'ROAMING' : `WAVE ${game.wave}`;
+    $('waveLeft').textContent = game.roaming ? `🌿 ${game.harvested} harvested` : game.phase === 'wave' ? `${game.enemiesLeft} left` : 'clear!';
     $('gold').textContent = `🟡 ${p.gold}`;
     const cd = Math.max(0, p.castCd) / s.spell.cooldown;
     const ready = p.castCd <= 0 && p.mana >= s.spell.cost;

@@ -34,7 +34,14 @@ const refresh = () => {
 };
 link.onState((s) => { log(`state: ${s}`); refresh(); renderPanel(); });
 link.onMessage((e) => {
-  if (e.type === 'hero.state') { hero = e.body as Messages['hero.state']; renderPanel(); return; }
+  if (e.type === 'hero.state') {
+    hero = e.body as Messages['hero.state'];
+    if (hero.harvested < harvested) harvested = 0; // a new game started
+    nutrients += hero.harvested - harvested;
+    harvested = hero.harvested;
+    renderPanel();
+    return;
+  }
   if (e.type === 'front.progress') { const p = e.body as Messages['front.progress']; if (p.id === front?.id) { nutrients += Math.max(0, p.bounty - front.bounty); front.bounty = p.bounty; front.progress = p; renderPanel(); } return; }
   if (e.type === 'front.result') { const r = e.body as Messages['front.result']; log(`front ${r.id}: ${r.outcome}, ${r.kills} kills`); if (r.id === front?.id) { front.outcome = r.outcome; nutrients += r.loot.goo; tech += r.loot.tech; log(`loot: ${r.loot.nutrients} nutrients earned, ${r.loot.goo} goo, ${r.loot.tech} tech`); renderPanel(); } return; }
   if (e.type === 'pong') log(`pong ${Math.round(performance.now() - (e.body as { t: number }).t)} ms`);
@@ -74,6 +81,8 @@ let hero: Messages['hero.state'] | null = null;
 /** an open front costs the commander too: nutrients drain every second until it is decided; at zero the front collapses */
 let fronts = 0;
 let tech = 0;
+/** the hero's running harvest total we have already been paid for */
+let harvested = 0;
 let front: { id: string; progress: Messages['front.progress'] | null; outcome: string | null; bounty: number } | null = null;
 setInterval(() => {
   nutrients += 15;

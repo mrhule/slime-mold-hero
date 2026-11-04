@@ -242,6 +242,41 @@ describe('artillery, bounty and the war room', () => {
   });
 });
 
+describe('roaming', () => {
+  it('has no waves, drops nutrients to harvest, and pays them out as a running total', () => {
+    const g = new Game(CHARACTERS[0], 4);
+    g.startRoam();
+    expect(g.phase).toBe('wave');
+    for (let i = 0; i < 30 * 30; i++) g.update(1 / 30, idle);
+    expect(g.enemies).toHaveLength(0);
+    expect(g.wave).toBe(0);
+    expect(g.phase).toBe('wave');
+    const drops = g.pickups.filter((k) => k.kind === 'nutrient');
+    expect(drops.length).toBeGreaterThan(0);
+    expect(drops.length).toBeLessThanOrEqual(TUNING.roam.maxDrops);
+    for (const d of drops) expect(Math.hypot(d.x - g.player.x, d.y - g.player.y)).toBeGreaterThan(100);
+    // walk onto one
+    const d = drops[0];
+    g.player.x = d.x;
+    g.player.y = d.y;
+    g.update(1 / 30, idle);
+    expect(g.harvested).toBe(TUNING.roam.dropValue);
+    expect(heroState(g)).toMatchObject({ roaming: true, harvested: TUNING.roam.dropValue });
+  });
+
+  it('forgets old drops, and a game that loses its link goes back to waves', () => {
+    const g = new Game(CHARACTERS[0], 4);
+    g.startRoam();
+    g.pickups.push({ x: 1800, y: 1400, vx: 0, vy: 0, kind: 'nutrient', value: 4, t: TUNING.roam.dropLife + 1 });
+    g.update(1 / 30, idle);
+    expect(g.pickups.some((k) => k.x === 1800)).toBe(false);
+    g.endRoam();
+    expect(g.roaming).toBe(false);
+    expect(g.wave).toBe(1);
+    expect(g.pickups.some((k) => k.kind === 'nutrient')).toBe(false);
+  });
+});
+
 describe('a linked hero', () => {
   it('has no shop and no goo: waves run back to back', () => {
     const g = new Game(CHARACTERS[0], 3);

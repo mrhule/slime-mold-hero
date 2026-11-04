@@ -35,7 +35,7 @@ export interface Bullet {
   x: number; y: number; vx: number; vy: number; r: number; damage: number; life: number; pierce: number;
   hit: number[]; friendly: boolean; px: number; py: number;
 }
-export interface Pickup { x: number; y: number; vx: number; vy: number; kind: 'gold' | 'heal'; value: number; t: number }
+export interface Pickup { x: number; y: number; vx: number; vy: number; kind: 'gold' | 'heal' | 'nutrient'; value: number; t: number }
 export interface Pool { x: number; y: number; r: number; life: number; max: number; dps: number; tick: number }
 export interface Lob { sx: number; sy: number; tx: number; ty: number; t: number; dur: number }
 export interface Blast { x: number; y: number; r: number; t: number; max: number; color: string }
@@ -120,6 +120,11 @@ export class Game {
    * Waves run back to back.
    */
   linked = false;
+  /** Linked with no front open: no waves, the hero wanders and harvests nutrient drops for the commander. */
+  roaming = false;
+  /** nutrients picked up while roaming, a running total the commander turns into income */
+  harvested = 0;
+  private dropT = 2;
   /** set when the commander deployed the hero to a front; the front, not the wave count, decides how long it lasts */
   front: FrontState | null = null;
   onEvent: (e: GameEvent) => void = () => {};
@@ -210,6 +215,46 @@ export class Game {
     if (this.front) this.queue = this.spendPool(this.queue, this.front);
     this.player.hp = Math.min(this.stats.maxHp, this.player.hp);
     this.onEvent('waveStart');
+  }
+
+  /** switch to roaming: clear the field and stop the waves */
+  startRoam(): void {
+    this.roaming = true;
+    this.linked = true;
+    this.phase = 'wave';
+    this.queue = [];
+    this.enemies = [];
+    this.bullets = this.bullets.filter((b) => b.friendly);
+    this.dropT = 2;
+  }
+
+  /** the link ended: back to the ordinary waves of a solo game */
+  endRoam(): void {
+    if (!this.roaming) return;
+    this.roaming = false;
+    this.linked = false;
+    this.pickups = this.pickups.filter((k) => k.kind !== 'nutrient');
+    this.phase = 'shop';
+    this.startWave();
+  }
+
+  private updateDrops(dt: number): void {
+    const t = TUNING.roam;
+    for (const k of this.pickups) if (k.kind === 'nutrient' && k.t > t.dropLife) k.value = 0;
+    this.pickups = this.pickups.filter((k) => !(k.kind === 'nutrient' && k.value === 0));
+    this.dropT -= dt;
+    if (this.dropT > 0) return;
+    this.dropT = t.dropEvery * (0.6 + this.rng() * 0.8);
+    if (this.pickups.filter((k) => k.kind === 'nutrient').length >= t.maxDrops) return;
+    for (let tries = 0; tries < 30; tries++) {
+      const a = this.rng() * Math.PI * 2;
+      const d = Math.sqrt(this.rng()) * (ARENA_R - 140);
+      const x = CENTER.x + Math.cos(a) * d;
+      const y = CENTER.y + Math.sin(a) * d;
+      if (this.blocked(x, y, 24) || Math.hypot(x - this.player.x, y - this.player.y) < t.minDistance) continue;
+      this.pickups.push({ x, y, vx: 0, vy: 0, kind: 'nutrient', value: t.dropValue, t: 0 });
+      return;
+    }
   }
 
   /** open this game as a front: the linked, endless waves become a fight over a nutrient pool */
@@ -325,10 +370,11 @@ export class Game {
     this.updateLobs(dt);
     this.updatePools(dt);
     this.updateStrikes(dt);
+    if (this.roaming) this.updateDrops(dt);
     this.updatePickups(dt);
     this.enemies = this.enemies.filter((e) => e.hp > 0);
 
-    if (this.phase === 'wave' && this.queue.length === 0 && this.enemies.length === 0) this.endWave();
+    if (this.phase === 'wave' && !this.roaming && this.queue.length === 0 && this.enemies.length === 0) this.endWave();
     else if (this.phase === 'clear') {
       this.clearT -= dt;
       if (this.clearT <= 0) {
@@ -735,7 +781,10 @@ export class Game {
       k.y += k.vy * dt;
       if (d < p.r + 10) {
         if (k.kind === 'gold') { p.gold += k.value; this.goldEarned += k.value; }
-        else p.hp = Math.min(this.stats.maxHp, p.hp + k.value);
+        else if (k.kind === 'nutrient') {
+          this.harvested += k.value;
+          this.floaters.push({ x: k.x, y: k.y - 14, text: `+${k.value}`, t: 0, color: '#8ff0c0', big: true });
+        } else p.hp = Math.min(this.stats.maxHp, p.hp + k.value);
         this.onEvent('pickup');
         continue;
       }

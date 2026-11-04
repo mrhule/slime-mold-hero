@@ -1,3 +1,4 @@
+import { TUNING } from './tuning';
 import { ENEMIES } from './enemies';
 import { ARENA_R, CENTER, type Enemy, type Game } from './sim';
 import { mulberry32 } from './rng';
@@ -639,6 +640,22 @@ export class Renderer {
       ctx.beginPath();
       ctx.arc(k.x - 2, k.y + bob - 2, 2, 0, TAU);
       ctx.fill();
+    } else if (k.kind === 'nutrient') {
+      const fade = Math.min(1, (TUNING.roam.dropLife - k.t) / 5);
+      ctx.globalAlpha = Math.max(0.2, fade);
+      ctx.beginPath();
+      ctx.arc(k.x, k.y + bob, 22 + Math.sin(t * 3 + k.y) * 3, 0, TAU);
+      ctx.fillStyle = 'rgba(143, 240, 192, 0.25)';
+      ctx.fill();
+      blob(ctx, k.x, k.y + bob, 11, t, k.x, 0.12);
+      ctx.fillStyle = '#5be0a8';
+      ctx.fill();
+      ink(ctx, 2.5);
+      ctx.fillStyle = '#e8fff4';
+      ctx.beginPath();
+      ctx.arc(k.x - 3, k.y + bob - 3, 3, 0, TAU);
+      ctx.fill();
+      ctx.globalAlpha = 1;
     } else {
       ctx.beginPath();
       ctx.arc(k.x, k.y + bob, 10, 0, TAU);

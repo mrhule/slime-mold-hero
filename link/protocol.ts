@@ -74,7 +74,7 @@ export interface Messages {
   strike: { x: number; y: number };
   /** commander -> hero: about once a second, drives the war-room map. The hero never answers it. */
   overview: { fronts: { id: string; name?: string; pressure: number; pool: number; hero: boolean }[]; territory: number; trend: number };
-  'hero.state': { mold: string; wave: number; hp: number; maxHp: number; mana: number; maxMana: number; levels: Record<string, number> };
+  'hero.state': { mold: string; wave: number; /** nutrients harvested from drops while roaming, a running total */ harvested: number; roaming: boolean; hp: number; maxHp: number; mana: number; maxMana: number; levels: Record<string, number> };
 }
 
 const CODE_LETTERS = 'ABCDEFGHJKMNPQRSTUVWXYZ';
