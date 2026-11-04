@@ -71,6 +71,7 @@ async function main(): Promise<void> {
 
   const onEvent = (e: GameEvent) => {
     sfx.play(e);
+    if (controls.touchMode) { if (e === 'hurt') navigator.vibrate?.(25); else if (e === 'cast') navigator.vibrate?.(14); }
     if (!game) return;
     if (e === 'waveStart') {
       dlog('wave', { n: game.wave, front: game.front?.spec.id, pool: game.front?.pool });
@@ -278,6 +279,8 @@ enemies ${game!.enemiesLeft} hp ${Math.round(game!.player.hp)}/${game!.stats.max
     return best;
   };
 
+  // the on-screen thumb hints show until a player has used both sticks once
+  let hintsOn = (() => { try { return !localStorage.getItem('sms-hints-done'); } catch { return true; } })();
   let last = performance.now();
   const frame = (now: number) => {
     const dt = Math.min(0.05, (now - last) / 1000);
@@ -285,10 +288,14 @@ enemies ${game!.enemiesLeft} hp ${Math.round(game!.player.hp)}/${game!.stats.max
     renderer.syncSize();
     renderer.mouse = controls.mouse;
     renderer.sticks = controls.sticks();
+    renderer.aimMode = controls.aimMode;
+    renderer.hints = hintsOn ? { move: !controls.usedMove, aim: !controls.usedAim } : { move: false, aim: false };
+    if (hintsOn && controls.usedMove && controls.usedAim) { hintsOn = false; try { localStorage.setItem('sms-hints-done', '1'); } catch { /* storage unavailable */ } }
     if (game) {
       const portraitTouch = controls.touchMode && window.innerHeight > window.innerWidth;
       if (!paused && !portraitTouch) {
         const near = nearest(game, 700);
+        renderer.autoTarget = near ? { x: near.x, y: near.y, r: near.r } : null;
         const fallback = near ? Math.atan2(near.y - game.player.y, near.x - game.player.x) : null;
         const input = controls.read((x, y) => renderer.screenToWorld(x, y), game.player, fallback);
         if (controls.touchMode) {

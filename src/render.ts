@@ -154,6 +154,11 @@ export class Renderer {
   touchMode = false;
   sticks: Stick[] = [];
   aimWorld: { x: number; y: number } | null = null;
+  /** touch aiming cue: by hand (a line), or at the nearest enemy (a ring round it) */
+  aimMode: 'manual' | 'auto' | null = null;
+  autoTarget: { x: number; y: number; r: number } | null = null;
+  /** show where to put each thumb until the player has used it */
+  hints = { move: false, aim: false };
 
   constructor(private canvas: HTMLCanvasElement, private imgs: Images) {
     this.ctx = canvas.getContext('2d')!;
@@ -355,6 +360,7 @@ export class Renderer {
       ctx.stroke();
       ctx.setLineDash([]);
     }
+    if (this.touchMode && game.phase !== 'dead') this.aimCue(p);
     ctx.restore();
 
     // vignette and crosshair in screen space
@@ -444,8 +450,84 @@ export class Renderer {
     }
   }
 
+  /** what the hero is about to shoot at, so a held thumb is never a guess */
+  private aimCue(p: { x: number; y: number }): void {
+    const { ctx } = this;
+    if (this.aimMode === 'auto' && this.autoTarget) {
+      const t = this.autoTarget;
+      for (const [col, lw] of [[INK, 7], ['#ff7a5a', 3.5]] as const) {
+        ctx.strokeStyle = col;
+        ctx.lineWidth = lw;
+        ctx.setLineDash([10, 8]);
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, t.r + 10, 0, TAU);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    } else if (this.aimMode === 'manual' && this.aimWorld) {
+      const dx = this.aimWorld.x - p.x;
+      const dy = this.aimWorld.y - p.y;
+      const m = Math.hypot(dx, dy) || 1;
+      for (const [col, lw] of [[INK, 6], ['rgba(255,246,200,0.85)', 3]] as const) {
+        ctx.strokeStyle = col;
+        ctx.lineWidth = lw;
+        ctx.setLineDash([12, 10]);
+        ctx.beginPath();
+        ctx.moveTo(p.x + (dx / m) * 40, p.y + (dy / m) * 40);
+        ctx.lineTo(p.x + (dx / m) * 300, p.y + (dy / m) * 300);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    }
+  }
+
+  /** faint rings and words showing the controls to a player who has not used them yet */
+  private drawHints(): void {
+    const { ctx, w, h } = this;
+    const pulse = 0.55 + 0.25 * Math.sin(performance.now() / 400);
+    const ring = (x: number, y: number, title: string, sub: string) => {
+      ctx.globalAlpha = pulse;
+      for (const [col, lw] of [[INK, 6], ['rgba(255,246,200,0.8)', 3]] as const) {
+        ctx.strokeStyle = col;
+        ctx.lineWidth = lw;
+        ctx.setLineDash([10, 9]);
+        ctx.beginPath();
+        ctx.arc(x, y, STICK_R, 0, TAU);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.textAlign = 'center';
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = INK;
+      ctx.fillStyle = '#fff6c8';
+      ctx.font = "20px Impact, 'Arial Black', sans-serif";
+      ctx.strokeText(title, x, y - 4);
+      ctx.fillText(title, x, y - 4);
+      ctx.font = "13px Impact, 'Arial Black', sans-serif";
+      ctx.strokeText(sub, x, y + 16);
+      ctx.fillText(sub, x, y + 16);
+      ctx.globalAlpha = 1;
+    };
+    const moving = this.sticks.some((s) => s.ox < w / 2);
+    const aiming = this.sticks.some((s) => s.ox >= w / 2);
+    if (this.hints.move && !moving) ring(w * 0.17, h * 0.66, 'MOVE', 'drag here');
+    if (this.hints.aim && !aiming) {
+      ring(w * 0.62, h * 0.66, 'FIRE', 'hold = auto-aim · drag = aim');
+      ctx.globalAlpha = pulse;
+      ctx.textAlign = 'center';
+      ctx.font = "13px Impact, 'Arial Black', sans-serif";
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = INK;
+      ctx.fillStyle = '#9fdcff';
+      ctx.strokeText('SPELL', w - 70, h - 122);
+      ctx.fillText('SPELL', w - 70, h - 122);
+      ctx.globalAlpha = 1;
+    }
+  }
+
   private drawSticks(): void {
     const { ctx } = this;
+    this.drawHints();
     for (const s of this.sticks) {
       const dx = s.x - s.ox;
       const dy = s.y - s.oy;

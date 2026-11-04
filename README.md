@@ -17,7 +17,8 @@ Designed for phones first, held sideways (portrait shows a "rotate your device" 
 | Input | Action |
 |---|---|
 | Left thumb, drag on the left half | Move |
-| Right thumb, drag on the right half | Aim and shoot while dragging |
+| Right thumb, hold on the right half | Fire. Left alone it aims at the nearest enemy (a ring shows the target) |
+| Right thumb, push firmly while holding | Aim by hand (a dotted line shows where); ease back to the centre to return to auto-aim |
 | ✦ button, bottom right | Cast your magic at the nearest enemy |
 | ❚❚ button, top right | Pause |
 

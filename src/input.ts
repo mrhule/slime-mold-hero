@@ -34,9 +34,18 @@ export function dragStick(s: Stick, x: number, y: number): void {
   }
 }
 
-/** firing starts at a firm push and stops only when the thumb is nearly back at the centre, so it does not flicker at the edge */
-export const FIRE_ON = 0.3;
-export const FIRE_OFF = 0.12;
+/**
+ * Holding the aim thumb fires. A firm push aims by hand; a thumb left near the centre aims at the nearest enemy.
+ * Switching back to auto needs the thumb nearly centred, so it does not flip at the boundary.
+ */
+export const AIM_ON = 0.35;
+export const AIM_OFF = 0.15;
+
+export function isManualAim(wasManual: boolean, mag: number): boolean {
+  return mag > (wasManual ? AIM_OFF : AIM_ON);
+}
+
+export type AimMode = 'manual' | 'auto' | null;
 
 /**
  * Touch (primary): left thumb moves, right thumb aims and fires while dragged, a button casts.
@@ -51,7 +60,12 @@ export class Controls {
   private aim: Stick | null = null;
   private castHeld = false;
   private lastAim: number | null = null;
-  private firing = false;
+  /** how the hero is aiming right now, for the on-screen aim cue */
+  aimMode: AimMode = null;
+  /** a thumb has been used on each stick this session; the on-screen hints stop once both have */
+  usedMove = false;
+  usedAim = false;
+  private manual = false;
 
   constructor(canvas: HTMLCanvasElement, private onKey: (code: string) => void, private onMode: (touch: boolean) => void) {
     window.addEventListener('keydown', (e) => {
@@ -126,7 +140,8 @@ export class Controls {
     this.move = null;
     this.aim = null;
     this.castHeld = false;
-    this.firing = false;
+    this.manual = false;
+    this.aimMode = null;
   }
 
   /** sticks to draw on screen */
@@ -137,15 +152,22 @@ export class Controls {
   /** `fallbackAim` is the angle to the nearest enemy, used until the player has aimed with the right stick */
   read(toWorld: (x: number, y: number) => { x: number; y: number }, p: { x: number; y: number }, fallbackAim: number | null): Input {
     if (this.touchMode) {
-      const mv = this.move ? vec(this.move) : { x: 0, y: 0 };
+      const mv = this.move ? vec(this.move) : { x: 0, y: 0, mag: 0 };
       const av = this.aim ? vec(this.aim) : null;
-      if (av && av.mag > 0.05) this.lastAim = Math.atan2(av.y, av.x);
-      this.firing = !!av && av.mag > (this.firing ? FIRE_OFF : FIRE_ON);
-      const ang = this.lastAim ?? fallbackAim ?? 0;
+      if (this.move) this.usedMove = true;
+      if (this.aim) this.usedAim = true;
+      this.manual = !!av && isManualAim(this.manual, av.mag);
+      if (av && this.manual) this.lastAim = Math.atan2(av.y, av.x);
+      // the hero faces what it will shoot: the stick, else the nearest enemy, else where it walks, else where it last aimed
+      const walking = mv.mag > 0.2 ? Math.atan2(mv.y, mv.x) : null;
+      const ang = this.manual ? this.lastAim! : fallbackAim ?? walking ?? this.lastAim ?? 0;
+      if (!this.manual && fallbackAim === null && walking !== null) this.lastAim = walking;
+      const held = !!this.aim;
+      this.aimMode = !held ? null : this.manual ? 'manual' : fallbackAim !== null ? 'auto' : null;
       return {
         moveX: mv.x, moveY: mv.y,
         aimX: p.x + Math.cos(ang) * 300, aimY: p.y + Math.sin(ang) * 300,
-        fire: this.firing, cast: this.castHeld,
+        fire: held, cast: this.castHeld,
       };
     }
     const k = this.keys;
