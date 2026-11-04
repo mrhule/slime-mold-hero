@@ -49,7 +49,7 @@ from `public/art/commander-*.webp`). Nothing else needs to change.
 ## Co-op (work in progress)
 
 The game works alone. A second player on the same Wi-Fi can link a commander to it; the design is in
-`docs/co-op-design.html`. So far: the link layer, a lobby, markers, and upgrades and supply from the commander.
+`docs/co-op-design.html`. So far: the link layer, a lobby, markers, upgrades and supply from the commander, and fronts.
 
 ```bash
 npm run lan        # same as dev, but reachable from other devices on your network
@@ -63,6 +63,7 @@ npm run lan        # same as dev, but reachable from other devices on your netwo
 - **While linked the hero has no shop and no goo.** The commander buys upgrades and supplies the hero (heal, refill mana),
   paid for from the commander's nutrients. Upgrade levels stay with each mold for as long as the link lasts and are shown
   as medals under the hero's bars. The stand-in commander has a hero panel with the upgrade list and supply buttons.
+- **Fronts.** The commander deploys the hero with `front.open` (seed, the rival's nutrient pool, wave tier, starting pressure), even from the title screen. Each enemy sent spends some of the pool; when it is empty and the last enemy falls the front is won, and if the hero falls it is lost. `front.recall` gives the hero a 5 second countdown to disengage. The hero reports `front.progress` once a second (pressure, pool left, kills) and `front.result` when decided. The stand-in commander has Open front / Recall buttons, a pressure bar, and drains its own nutrients while a front is open (zero recalls the hero). Tuning lives in `FRONT` in `src/sim.ts`.
 - If a device drops off it keeps its seat for 60 seconds and rejoins on its own; after that, or if either side leaves,
   both games carry on solo.
 - `link/` holds the protocol, relay and client shared by the games. `vite preview` serves the relay too.

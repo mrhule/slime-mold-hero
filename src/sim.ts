@@ -1,5 +1,5 @@
 import type { CharacterDef } from './characters';
-import { BOSS_SPRITES, ENEMIES, planWave, type EnemyKind, type Spawn } from './enemies';
+import { BOSS_SPRITES, ENEMIES, planWave, spawnCost, type EnemyKind, type Spawn } from './enemies';
 import { mulberry32 } from './rng';
 import { UPGRADES, derive, emptyLevels, upgradeCost, type Derived, type Levels } from './upgrades';
 
@@ -51,6 +51,37 @@ const ROCKS = [
 ];
 export const ROCK_SIZES: Record<string, { w: number; h: number }> = Object.fromEntries(ROCKS.map((r) => [r.key, { w: r.w, h: r.h }]));
 
+/** what the commander sends to open a front: the rival's nutrient pool sizes the fight */
+export interface FrontSpec {
+  id: string;
+  seed: number;
+  /** the rival's nutrients at this front; each enemy spawned spends some */
+  pool: number;
+  /** how strong the rival's waves start (1 is the first wave of a solo game) */
+  tier: number;
+  /** 0 (our line is solid) to 1 (about to break) when the hero arrives */
+  pressure: number;
+}
+
+export type FrontOutcome = 'won' | 'lost' | 'recalled';
+
+export interface FrontState {
+  spec: FrontSpec;
+  /** rival nutrients not yet spent on enemies */
+  pool: number;
+  /** set once, when the front is decided */
+  result: FrontOutcome | null;
+  /** seconds left to disengage after a recall; 0 when not recalled */
+  recallT: number;
+}
+
+/** tuning for front mode, kept together so playtests can change it in one place */
+export const FRONT = {
+  recallSeconds: 5,
+  /** how much of the pressure comes from the hero's missing health */
+  hurtWeight: 0.4,
+};
+
 export class Game {
   readonly ch: CharacterDef;
   readonly rng: () => number;
@@ -83,6 +114,8 @@ export class Game {
    * Waves run back to back.
    */
   linked = false;
+  /** set when the commander deployed the hero to a front; the front, not the wave count, decides how long it lasts */
+  front: FrontState | null = null;
   onEvent: (e: GameEvent) => void = () => {};
   private queue: Spawn[] = [];
   private waveTime = 0;
@@ -140,9 +173,56 @@ export class Game {
     this.wave++;
     this.phase = 'wave';
     this.waveTime = 0;
-    this.queue = planWave(this.wave, this.rng);
+    this.queue = planWave(this.front ? this.front.spec.tier + this.wave - 1 : this.wave, this.rng);
+    if (this.front) this.queue = this.spendPool(this.queue, this.front);
     this.player.hp = Math.min(this.stats.maxHp, this.player.hp);
     this.onEvent('waveStart');
+  }
+
+  /** open this game as a front: the linked, endless waves become a fight over a nutrient pool */
+  openFront(spec: FrontSpec): void {
+    this.linked = true;
+    this.front = { spec, pool: Math.max(0, spec.pool), result: null, recallT: 0 };
+  }
+
+  /** the rival spends its pool on the wave; whatever does not fit is never sent */
+  private spendPool(plan: Spawn[], f: FrontState): Spawn[] {
+    const out: Spawn[] = [];
+    for (const s of plan) {
+      const c = spawnCost(s.kind);
+      if (c > f.pool) continue;
+      f.pool -= c;
+      out.push(s);
+    }
+    if (!out.length) f.pool = 0; // too little left to send anything: the rival is spent
+    return out;
+  }
+
+  /** the commander orders a retreat; the hero has a few seconds to disengage */
+  recall(): void {
+    const f = this.front;
+    if (!f || f.result || f.recallT > 0) return;
+    f.recallT = FRONT.recallSeconds;
+  }
+
+  /** who is winning this front, 0 (our side) to 1 (the rival's): the commander's pressure meter */
+  get pressure(): number {
+    const f = this.front;
+    if (!f) return 0;
+    if (f.result === 'won') return 0;
+    const left = f.spec.pool > 0 ? f.pool / f.spec.pool : 0;
+    const hurt = 1 - Math.max(0, this.player.hp) / this.stats.maxHp;
+    return Math.max(0, Math.min(1, f.spec.pressure * left + hurt * FRONT.hurtWeight));
+  }
+
+  private tickFront(dt: number): void {
+    const f = this.front;
+    if (!f || f.result) return;
+    if (this.phase === 'dead') f.result = 'lost';
+    else if (f.recallT > 0) {
+      f.recallT -= dt;
+      if (f.recallT <= 0) { f.recallT = 0; f.result = 'recalled'; }
+    }
   }
 
   nextCost(id: string): number | null {
@@ -201,7 +281,8 @@ export class Game {
     this.time += dt;
     this.shake = Math.max(0, this.shake - dt * 30);
     this.updateFx(dt);
-    if (this.phase === 'dead' || this.phase === 'shop') return;
+    this.tickFront(dt);
+    if (this.phase === 'dead' || this.phase === 'shop' || this.front?.result) return;
 
     this.waveTime += dt;
     this.updatePlayer(dt, input);
@@ -218,7 +299,8 @@ export class Game {
       this.clearT -= dt;
       if (this.clearT <= 0) {
         this.phase = 'shop';
-        if (this.linked) this.startWave();
+        if (this.front && this.front.pool < 1) this.front.result = 'won'; // the rival has nothing left to send
+        else if (this.linked) this.startWave();
       }
     }
   }

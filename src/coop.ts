@@ -2,7 +2,7 @@ import { Link, WebSocketTransport } from '../link/client';
 import type { Envelope, Messages } from '../link/protocol';
 import { RELAY_PATH } from '../link/relay-path';
 import { CHARACTERS } from './characters';
-import type { Game } from './sim';
+import type { FrontSpec, Game } from './sim';
 import { UPGRADES, emptyLevels, type Levels } from './upgrades';
 
 /** this game's side of the co-op link: it plays the hero */
@@ -17,6 +17,8 @@ export type MoldLevels = Record<string, Levels>;
 export interface HeroCtx {
   game: Game | null;
   molds: MoldLevels;
+  /** deploy to a front: start a fresh arena built from the spec */
+  openFront: (spec: FrontSpec) => void;
   send: <K extends keyof Messages>(type: K, body: Messages[K]) => void;
 }
 
@@ -66,7 +68,39 @@ export function handleEnvelope(env: Envelope, ctx: HeroCtx): boolean {
       if (!ctx.game) return false;
       ctx.game.supply(num(b.health) ?? 0, num(b.mana) ?? 0);
       return true;
+    case 'front.open': {
+      const seed = num(b.seed);
+      const pool = num(b.pool);
+      const tier = num(b.tier);
+      const pressure = num(b.pressure);
+      if (typeof b.id !== 'string' || b.id.length > 40 || seed === null || pool === null || tier === null || pressure === null) return false;
+      ctx.openFront({
+        id: b.id,
+        seed: Math.floor(seed),
+        pool: Math.max(0, Math.min(2000, pool)),
+        tier: Math.max(1, Math.min(60, Math.floor(tier))),
+        pressure: Math.max(0, Math.min(1, pressure)),
+      });
+      return true;
+    }
+    case 'front.recall':
+      if (ctx.game && ctx.game.front?.spec.id === b.id) ctx.game.recall();
+      return false;
     default:
       return false;
   }
+}
+
+/** the one-second report for the commander's pressure meter, or null when no front is open */
+export function frontProgress(game: Game): Messages['front.progress'] | null {
+  const f = game.front;
+  if (!f || f.result) return null;
+  return {
+    id: f.spec.id,
+    wave: game.wave,
+    kills: game.kills,
+    hp: Math.round((game.player.hp / game.stats.maxHp) * 100) / 100,
+    pressure: Math.round(game.pressure * 100) / 100,
+    pool: f.spec.pool > 0 ? Math.round((f.pool / f.spec.pool) * 100) / 100 : 0,
+  };
 }
