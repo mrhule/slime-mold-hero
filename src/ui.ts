@@ -14,6 +14,23 @@ export interface UiHandlers {
   coopJoin(code: string): void;
   coopLeave(): void;
   coopBack(): void;
+  /** serverless pairing: the host makes an invite, the guest pastes it and replies, the host pastes the reply */
+  pairHost(): void;
+  pairJoinStart(): void;
+  pairAccept(answer: string): void;
+  pairJoin(offer: string): void;
+  pairCancel(): void;
+}
+
+/** what the serverless pairing screen shows */
+export interface PairInfo {
+  mode: 'host' | 'join';
+  /** the host's block, once made */
+  offer: string | null;
+  /** the guest's reply block, once made */
+  answer: string | null;
+  busy: boolean;
+  error: string | null;
 }
 
 export interface CoopInfo {
@@ -73,6 +90,16 @@ export class Ui {
         case 'coop-join': this.h.coopJoin((this.overlay.querySelector<HTMLInputElement>('#codeIn')?.value ?? '').trim()); break;
         case 'coop-leave': this.h.coopLeave(); break;
         case 'coop-back': this.h.coopBack(); break;
+        case 'pair-host': this.h.pairHost(); break;
+        case 'pair-join-start': this.h.pairJoinStart(); break;
+        case 'pair-accept': this.h.pairAccept(this.overlay.querySelector<HTMLTextAreaElement>('#pairIn')?.value ?? ''); break;
+        case 'pair-join': this.h.pairJoin(this.overlay.querySelector<HTMLTextAreaElement>('#pairIn')?.value ?? ''); break;
+        case 'pair-cancel': this.h.pairCancel(); break;
+        case 'pair-copy': {
+          const box = this.overlay.querySelector<HTMLTextAreaElement>('#pairOut');
+          if (box) { box.select(); void navigator.clipboard?.writeText(box.value).catch(() => document.execCommand('copy')); }
+          break;
+        }
       }
     });
   }
@@ -199,7 +226,9 @@ export class Ui {
       body = `
         <p class="sub">Play with a commander on another device on the same Wi-Fi.</p>
         <button class="big" data-action="coop-host" ${info.busy ? 'disabled' : ''}>Host a room</button>
-        <div class="join"><input id="codeIn" maxlength="4" placeholder="CODE" autocomplete="off" autocapitalize="characters" spellcheck="false"><button data-action="coop-join" ${info.busy ? 'disabled' : ''}>Join</button></div>`;
+        <div class="join"><input id="codeIn" maxlength="4" placeholder="CODE" autocomplete="off" autocapitalize="characters" spellcheck="false"><button data-action="coop-join" ${info.busy ? 'disabled' : ''}>Join</button></div>
+        <p class="sub">No server on this network? Pair by copy and paste.</p>
+        <div class="join"><button data-action="pair-host">Host by paste</button><button data-action="pair-join-start">Join by paste</button></div>`;
     } else if (info.state === 'hosting') {
       body = `
         <p class="sub">Give this code to the commander.</p>
@@ -221,6 +250,29 @@ export class Ui {
         <button data-action="coop-back">Back</button>
       </div>`);
     this.coopShown = true;
+  }
+
+  /** serverless pairing screen. Text boxes keep what is typed, so call it only when the step changes. */
+  showPair(p: PairInfo): void {
+    const out = (label: string, text: string) =>
+      `<p class="sub">${label}</p><textarea id="pairOut" readonly rows="4">${text}</textarea><button data-action="pair-copy">Copy</button>`;
+    let body: string;
+    if (p.mode === 'host') {
+      body = p.offer
+        ? `${out('1. Send this to the other device, any way you like.', p.offer)}
+           <p class="sub">2. Paste the reply it gives you.</p>
+           <textarea id="pairIn" rows="3" placeholder="Paste the reply" spellcheck="false"></textarea>
+           <button class="big" data-action="pair-accept" ${p.busy ? 'disabled' : ''}>Connect</button>`
+        : '<p class="sub">Preparing…</p>';
+    } else if (p.answer) {
+      body = `${out('Send this reply back to the host. It connects when they paste it.', p.answer)}<p class="sub">Waiting for the host…</p>`;
+    } else {
+      body = `<p class="sub">Paste the block from the host device.</p>
+        <textarea id="pairIn" rows="4" placeholder="Paste the host block" spellcheck="false"></textarea>
+        <button class="big" data-action="pair-join" ${p.busy ? 'disabled' : ''}>Make reply</button>`;
+    }
+    this.show(`<div class="screen coop pair"><h1>Pair by paste</h1>${body}${p.error ? `<p class="err">${p.error}</p>` : ''}<button data-action="pair-cancel">Cancel</button></div>`);
+    this.coopShown = false;
   }
 
   banner(text: string, boss = false): void {

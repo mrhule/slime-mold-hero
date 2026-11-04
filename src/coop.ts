@@ -1,4 +1,4 @@
-import { Link, WebSocketTransport } from '../link/client';
+import { Link, WebSocketTransport, type Transport } from '../link/client';
 import type { Envelope, Messages } from '../link/protocol';
 import { RELAY_PATH } from '../link/relay-path';
 import { CHARACTERS } from './characters';
@@ -6,10 +6,16 @@ import { dlog } from './debug';
 import type { FrontSpec, Game } from './sim';
 import { UPGRADES, emptyLevels, type Levels } from './upgrades';
 
+/** the relay served next to this page (npm run lan) */
+export const relayTransport = (): Transport =>
+  new WebSocketTransport(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${RELAY_PATH}`);
+
+/** which transport the next connection uses: the relay by default, or a paste-paired one while pairing */
+export interface Route { make: () => Transport }
+
 /** this game's side of the co-op link: it plays the hero */
-export function makeLink(): Link {
-  const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${RELAY_PATH}`;
-  return new Link(() => new WebSocketTransport(url), { role: 'hero', name: 'Hero' });
+export function makeLink(route: Route): Link {
+  return new Link(() => route.make(), { role: 'hero', name: 'Hero' });
 }
 
 /** upgrade levels the commander has bought, kept per mold for as long as the link lasts */
