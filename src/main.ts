@@ -1,8 +1,7 @@
 import './style.css';
 import { Sfx } from './audio';
 import { CHARACTERS } from './characters';
-import type { Messages } from '../link/protocol';
-import { makeLink } from './coop';
+import { handleEnvelope, heroState, makeLink, type MoldLevels } from './coop';
 import { Controls } from './input';
 import { Renderer, loadImages } from './render';
 import { Game, type Enemy, type GameEvent, type Phase } from './sim';
@@ -32,7 +31,8 @@ async function main(): Promise<void> {
   const start = (id: string) => {
     charId = id;
     const ch = CHARACTERS.find((c) => c.id === id) ?? CHARACTERS[0];
-    game = new Game(ch, Math.floor(Math.random() * 1e9));
+    game = new Game(ch, Math.floor(Math.random() * 1e9), isLinked() ? molds[id] : undefined);
+    game.linked = isLinked();
     game.onEvent = onEvent;
     renderer.reset(game);
     paused = false;
@@ -104,18 +104,22 @@ async function main(): Promise<void> {
     }
   };
   link.onState(() => {
+    syncLinked();
     ui.setLink(linkText());
     if (ui.coopShown) showCoop();
   });
-  link.onMessage((e) => {
-    if (e.type === 'marker') {
-      const b = e.body as Partial<Messages['marker']> | null;
-      if (game && b && Number.isFinite(b.x) && Number.isFinite(b.y)) game.addMarker(b.x!, b.y!, typeof b.label === 'string' ? b.label : '');
-    } else if (e.type === 'ping') {
-      const b = e.body as Partial<Messages['ping']> | null;
-      link.send('pong', { t: Number(b?.t) || 0 });
-    }
-  });
+  // while linked the commander buys upgrades and supplies the hero: no shop, no goo
+  const molds: MoldLevels = {};
+  const isLinked = () => link.state === 'linked' || link.state === 'dropped';
+  const report = () => { if (game && link.state === 'linked') link.send('hero.state', heroState(game)); };
+  const syncLinked = () => {
+    document.body.classList.toggle('linked', isLinked());
+    if (game) game.linked = isLinked();
+    if (link.state === 'solo') for (const k of Object.keys(molds)) delete molds[k];
+    if (link.state === 'linked' && game) { molds[game.ch.id] = { ...game.levels }; report(); }
+  };
+  link.onMessage((e) => { if (handleEnvelope(e, { game, molds, send: (t, b) => link.send(t, b) })) report(); });
+  setInterval(report, 1000);
   window.addEventListener('beforeunload', () => link.leave());
 
   const controls = new Controls(

@@ -1,5 +1,5 @@
 import { CHARACTERS, type CharacterDef } from './characters';
-import { UPGRADES } from './upgrades';
+import { UPGRADES, type Levels } from './upgrades';
 import type { Game } from './sim';
 
 export interface UiHandlers {
@@ -43,6 +43,7 @@ export class Ui {
   private selected = 'general-goo';
   private bannerTimer = 0;
   private linkLabel = '';
+  private medalKey = '';
   coopShown = false;
 
   constructor(private h: UiHandlers) {
@@ -230,7 +231,17 @@ export class Ui {
     this.bannerTimer = window.setTimeout(() => (el.className = ''), 1800);
   }
 
+  /** upgrades shown as medals on the hero, so its growth is visible */
+  private medals(levels: Levels): void {
+    const key = UPGRADES.map((u) => levels[u.id] ?? 0).join(',');
+    if (key === this.medalKey) return;
+    this.medalKey = key;
+    $('medals').innerHTML = UPGRADES.filter((u) => (levels[u.id] ?? 0) > 0)
+      .map((u) => `<span class="medal" title="${u.name}">${u.icon}<b>${levels[u.id]}</b></span>`).join('');
+  }
+
   hud(game: Game): void {
+    this.medals(game.levels);
     const s = game.stats;
     const p = game.player;
     $('hpFill').style.width = `${(p.hp / s.maxHp) * 100}%`;

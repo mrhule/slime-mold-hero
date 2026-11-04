@@ -78,15 +78,21 @@ export class Game {
   shake = 0;
   clearT = 0;
   lastClearBonus = 0;
+  /**
+   * Linked to a commander: no shop and no goo, because the commander buys upgrades and supplies the hero.
+   * Waves run back to back.
+   */
+  linked = false;
   onEvent: (e: GameEvent) => void = () => {};
   private queue: Spawn[] = [];
   private waveTime = 0;
   private nextId = 1;
   private bossIndex = 0;
 
-  constructor(ch: CharacterDef, seed = 1) {
+  constructor(ch: CharacterDef, seed = 1, levels?: Levels) {
     this.ch = ch;
     this.rng = mulberry32(seed);
+    if (levels) this.levels = { ...emptyLevels(), ...levels };
     this.stats = derive(ch, this.levels);
     this.player = {
       x: CENTER.x, y: CENTER.y, vx: 0, vy: 0, r: ch.radius, hp: this.stats.maxHp, mana: this.stats.maxMana, gold: 0, aim: 0,
@@ -160,6 +166,37 @@ export class Game {
     return true;
   }
 
+  /** the commander bought an upgrade: set that level (never above the cap) and refresh stats */
+  setLevel(id: string, level: number): boolean {
+    const def = UPGRADES.find((u) => u.id === id);
+    if (!def || !Number.isFinite(level)) return false;
+    const next = Math.max(0, Math.min(def.max, Math.floor(level)));
+    const before = this.stats;
+    this.levels[id] = next;
+    this.stats = derive(this.ch, this.levels);
+    if (id === 'vitality') this.player.hp = Math.min(this.stats.maxHp, this.player.hp + Math.max(0, this.stats.maxHp - before.maxHp));
+    if (id === 'mana') this.player.mana = Math.min(this.stats.maxMana, this.player.mana + Math.max(0, this.stats.maxMana - before.maxMana));
+    this.onEvent('buy');
+    return true;
+  }
+
+  /** the commander spent nutrients to restore a fraction of health and mana */
+  supply(health: number, mana: number): void {
+    const p = this.player;
+    if (this.phase === 'dead') return;
+    const h = Math.max(0, Math.min(1, health || 0));
+    const m = Math.max(0, Math.min(1, mana || 0));
+    if (h > 0) {
+      p.hp = Math.min(this.stats.maxHp, p.hp + this.stats.maxHp * h);
+      this.floaters.push({ x: p.x, y: p.y - p.r - 10, text: '+HP', t: 0, color: '#6fdc4f', big: true });
+    }
+    if (m > 0) {
+      p.mana = Math.min(this.stats.maxMana, p.mana + this.stats.maxMana * m);
+      this.floaters.push({ x: p.x, y: p.y - p.r - 28, text: '+MANA', t: 0, color: '#6ec6ff', big: true });
+    }
+    if (h > 0 || m > 0) this.onEvent('pickup');
+  }
+
   update(dt: number, input: Input): void {
     this.time += dt;
     this.shake = Math.max(0, this.shake - dt * 30);
@@ -179,7 +216,10 @@ export class Game {
     if (this.phase === 'wave' && this.queue.length === 0 && this.enemies.length === 0) this.endWave();
     else if (this.phase === 'clear') {
       this.clearT -= dt;
-      if (this.clearT <= 0) this.phase = 'shop';
+      if (this.clearT <= 0) {
+        this.phase = 'shop';
+        if (this.linked) this.startWave();
+      }
     }
   }
 
@@ -187,7 +227,7 @@ export class Game {
     this.phase = 'clear';
     this.clearT = 1.6;
     this.bullets = this.bullets.filter((b) => b.friendly);
-    this.lastClearBonus = 10 + 5 * this.wave;
+    this.lastClearBonus = this.linked ? 0 : 10 + 5 * this.wave;
     this.player.gold += this.lastClearBonus;
     this.goldEarned += this.lastClearBonus;
     this.player.hp = Math.min(this.stats.maxHp, this.player.hp + this.stats.maxHp * 0.25);
@@ -474,7 +514,7 @@ export class Game {
     this.splats.push({ x: e.x, y: e.y, r: e.r * 1.4, color: def.colors.dark });
     for (let i = 0; i < 12; i++) this.spark(e.x, e.y, i % 2 ? def.colors.body : def.colors.light, 50 + this.rng() * 200);
     const value = Math.max(1, Math.round(e.gold * (1 + 0.04 * (this.wave - 1))));
-    const drops = e.kind === 'boss' ? 10 : Math.min(3, value);
+    const drops = this.linked ? 0 : e.kind === 'boss' ? 10 : Math.min(3, value);
     for (let i = 0; i < drops; i++) {
       const a = this.rng() * Math.PI * 2;
       const sp = 60 + this.rng() * 120;

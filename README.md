@@ -49,7 +49,7 @@ from `public/art/commander-*.webp`). Nothing else needs to change.
 ## Co-op (work in progress)
 
 The game works alone. A second player on the same Wi-Fi can link a commander to it; the design is in
-`docs/co-op-design.html`. This is step 1 of its build order: the link layer, a lobby and a marker.
+`docs/co-op-design.html`. So far: the link layer, a lobby, markers, and upgrades and supply from the commander.
 
 ```bash
 npm run lan        # same as dev, but reachable from other devices on your network
@@ -60,6 +60,9 @@ npm run lan        # same as dev, but reachable from other devices on your netwo
 - In the game choose **Co-op → Host a room** and read out the code, or open the page with `?join=CODE`.
 - `/commander.html` is a stand-in commander for trying the link: join with the code, then click the dish to drop
   a marker in the hero's arena. A `ping` shows the round trip time.
+- **While linked the hero has no shop and no goo.** The commander buys upgrades and supplies the hero (heal, refill mana),
+  paid for from the commander's nutrients. Upgrade levels stay with each mold for as long as the link lasts and are shown
+  as medals under the hero's bars. The stand-in commander has a hero panel with the upgrade list and supply buttons.
 - If a device drops off it keeps its seat for 60 seconds and rejoins on its own; after that, or if either side leaves,
   both games carry on solo.
 - `link/` holds the protocol, relay and client shared by the games. `vite preview` serves the relay too.

@@ -13,6 +13,16 @@
       canvas { background: #1b2016; border: 3px solid #0b0b0b; touch-action: none; max-width: 100%; }
       pre { margin: 0; background: #181c13; border: 2px solid #0b0b0b; padding: 8px 12px; min-height: 90px; width: min(100%, 420px); font-size: 12px; overflow: auto; }
       #status { font-weight: 600; }
+      #panel { display: grid; gap: 10px; width: min(100%, 520px); }
+      #nutrients { font: 22px Impact, 'Arial Black', sans-serif; color: #8fd264; letter-spacing: 1px; }
+      .bar { position: relative; height: 22px; background: #11140e; border: 3px solid #0b0b0b; }
+      .bar i { position: absolute; inset: 0 auto 0 0; }
+      .bar.hp i { background: #d8503a; } .bar.mana i { background: #3f7bd6; }
+      .bar span { position: relative; font-size: 12px; padding-left: 6px; }
+      #ups { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+      .up { display: flex; justify-content: space-between; align-items: center; gap: 8px; background: #181c13; border: 2px solid #0b0b0b; padding: 4px 8px; }
+      .up button { padding: 4px 10px; min-width: 70px; }
+      button:disabled { filter: grayscale(1) brightness(0.6); cursor: not-allowed; }
     </style>
   </head>
   <body>
@@ -26,6 +36,13 @@
       <button id="ping">Ping</button>
     </div>
     <div id="status">Solo</div>
+    <div id="panel" hidden>
+      <div id="nutrients"></div>
+      <div class="bar hp"><i id="hpBar"></i><span id="hpTxt"></span></div>
+      <div class="bar mana"><i id="manaBar"></i><span id="manaTxt"></span></div>
+      <div class="row"><button id="healBtn">Heal 40% · 40</button><button id="manaBtn">Refill mana · 30</button><span id="heroInfo"></span></div>
+      <div id="ups"></div>
+    </div>
     <canvas id="dish" width="300" height="300"></canvas>
     <pre id="log"></pre>
     <script type="module" src="/commander/main.ts"></script>

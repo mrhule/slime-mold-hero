@@ -1,8 +1,72 @@
 import { Link, WebSocketTransport } from '../link/client';
+import type { Envelope, Messages } from '../link/protocol';
 import { RELAY_PATH } from '../link/relay-path';
+import { CHARACTERS } from './characters';
+import type { Game } from './sim';
+import { UPGRADES, emptyLevels, type Levels } from './upgrades';
 
 /** this game's side of the co-op link: it plays the hero */
 export function makeLink(): Link {
   const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${RELAY_PATH}`;
   return new Link(() => new WebSocketTransport(url), { role: 'hero', name: 'Hero' });
+}
+
+/** upgrade levels the commander has bought, kept per mold for as long as the link lasts */
+export type MoldLevels = Record<string, Levels>;
+
+export interface HeroCtx {
+  game: Game | null;
+  molds: MoldLevels;
+  send: <K extends keyof Messages>(type: K, body: Messages[K]) => void;
+}
+
+/** what the commander's hero panel needs to know */
+export function heroState(game: Game): Messages['hero.state'] {
+  const s = game.stats;
+  return {
+    mold: game.ch.id,
+    wave: game.wave,
+    hp: Math.round(game.player.hp),
+    maxHp: s.maxHp,
+    mana: Math.round(game.player.mana),
+    maxMana: s.maxMana,
+    levels: { ...game.levels },
+  };
+}
+
+const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+/**
+ * Apply one message from the commander. Bodies are untrusted, so check them.
+ * Returns true when the hero's state changed and should be reported back.
+ */
+export function handleEnvelope(env: Envelope, ctx: HeroCtx): boolean {
+  const b = (env.body ?? {}) as Record<string, unknown>;
+  switch (env.type) {
+    case 'marker': {
+      const x = num(b.x);
+      const y = num(b.y);
+      if (ctx.game && x !== null && y !== null) ctx.game.addMarker(x, y, typeof b.label === 'string' ? b.label : '');
+      return false;
+    }
+    case 'ping':
+      ctx.send('pong', { t: num(b.t) ?? 0 });
+      return false;
+    case 'upgrade': {
+      const level = num(b.level);
+      const known = CHARACTERS.some((c) => c.id === b.mold);
+      if (!known || typeof b.mold !== 'string' || typeof b.id !== 'string' || level === null || !UPGRADES.some((u) => u.id === b.id)) return false;
+      const def = UPGRADES.find((u) => u.id === b.id)!;
+      const clamped = Math.max(0, Math.min(def.max, Math.floor(level)));
+      ctx.molds[b.mold] = { ...(ctx.molds[b.mold] ?? emptyLevels()), [b.id]: clamped };
+      if (ctx.game?.ch.id === b.mold) ctx.game.setLevel(b.id, clamped);
+      return true;
+    }
+    case 'supply':
+      if (!ctx.game) return false;
+      ctx.game.supply(num(b.health) ?? 0, num(b.mana) ?? 0);
+      return true;
+    default:
+      return false;
+  }
 }

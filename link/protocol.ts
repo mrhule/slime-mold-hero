@@ -51,6 +51,12 @@ export interface Messages {
   /** round trip check */
   ping: { t: number };
   pong: { t: number };
+  /** commander -> hero: the commander bought this upgrade for that mold; the hero applies the new level */
+  upgrade: { mold: string; id: string; level: number };
+  /** commander -> hero: the commander spent nutrients to restore a fraction of the hero's health and mana (0 to 1) */
+  supply: { health: number; mana: number };
+  /** hero -> commander: what the commander's hero panel shows. Sent when something changes and about once a second. */
+  'hero.state': { mold: string; wave: number; hp: number; maxHp: number; mana: number; maxMana: number; levels: Record<string, number> };
 }
 
 const CODE_LETTERS = 'ABCDEFGHJKMNPQRSTUVWXYZ';
