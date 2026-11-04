@@ -80,6 +80,17 @@ npm run lan        # same as dev, but reachable from other devices on your netwo
   both games carry on solo.
 - `link/` holds the protocol, relay and client shared by the games. `vite preview` serves the relay too.
 
+## Security notes
+
+The co-op link is built for a trusted home network, not the internet.
+
+- `npm run lan` (`vite --host`) makes the dev server, and the relay at `/link`, reachable from every device on your network. Use it on a network you trust, and stop it when you are done. Plain `npm run dev` listens on this computer only.
+- The relay has no passwords: anyone who can reach it and knows a 4 letter room code can join that room. It limits what a stranger can do: at most 64 rooms and 64 connections, frames over 16 KB are refused, a connection that guesses 8 wrong codes is cut off, and a new room never replaces an existing one.
+- A web page from elsewhere on the internet cannot open the relay: WebSocket connections whose `Origin` is not this computer, a private address (10.x, 172.16-31.x, 192.168.x, `.local`) or the page's own host get a 403. `?relay=` only takes effect for those same addresses, so a crafted link cannot point the game at a stranger's server.
+- Text from another device (peer names, codes, errors) is shown as text, never as markup.
+- A pair-by-paste block contains the device's local network address. Send it only to the person you are pairing with.
+- Messages from the commander are checked and clamped before they touch the game, but a linked commander is trusted to spend nutrients honestly: the hero applies upgrades, supplies, strikes and defenses it is sent.
+
 ## Run it
 
 ```bash

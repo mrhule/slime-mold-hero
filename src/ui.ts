@@ -49,6 +49,9 @@ export interface CoopInfo {
   busy: boolean;
 }
 
+/** text from another device (a peer's name, a room code, an error) goes into the page as text, never as markup */
+const esc = (s: unknown): string => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c);
+
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 function bar(value: number, max: number): string {
@@ -234,7 +237,7 @@ export class Ui {
   }
 
   showCoop(info: CoopInfo): void {
-    const peers = info.peers.map((p) => `<li>${p.online ? '●' : '○'} ${p.role === 'cmd' ? 'Commander' : 'Hero'} (${p.name})${p.online ? '' : ' · reconnecting'}</li>`).join('');
+    const peers = info.peers.map((p) => `<li>${p.online ? '●' : '○'} ${p.role === 'cmd' ? 'Commander' : 'Hero'} (${esc(p.name)})${p.online ? '' : ' · reconnecting'}</li>`).join('');
     let body: string;
     if (info.state === 'solo') {
       body = `
@@ -247,14 +250,14 @@ export class Ui {
       body = `
         <p class="sub">Scan this with the other device's camera, or give them the code.</p>
         ${info.qr ? `<div class="qrbox">${info.qr}</div>` : ''}
-        <div class="code small">${info.code}</div>
+        <div class="code small">${esc(info.code)}</div>
         ${info.localhost ? `<p class="err">This page is open as localhost, so another device cannot reach it. Open it by the network address of this computer instead.</p>` : ''}
-        <label class="peer">Other game's address <input id="peerIn" value="${(info.peer ?? '').replace(/"/g, '&quot;')}" spellcheck="false" autocapitalize="off"></label>
+        <label class="peer">Other game's address <input id="peerIn" value="${esc(info.peer ?? '')}" spellcheck="false" autocapitalize="off"></label>
         <p class="sub">Waiting for them to join. You can keep playing.</p>
         <button data-action="coop-leave">Cancel</button>`;
     } else {
       body = `
-        <div class="code small">${info.code}</div>
+        <div class="code small">${esc(info.code)}</div>
         <ul class="peers">${peers}</ul>
         <p class="sub">${info.state === 'dropped' ? 'The link is down. Trying to reconnect, and play carries on meanwhile.' : 'Linked.'}</p>
         <button data-action="coop-leave">Leave</button>`;
@@ -263,7 +266,7 @@ export class Ui {
       <div class="screen coop">
         <h1>Co-op</h1>
         ${body}
-        ${info.error ? `<p class="err">${info.error}</p>` : ''}
+        ${info.error ? `<p class="err">${esc(info.error)}</p>` : ''}
         <button data-action="coop-back">Back</button>
       </div>`);
     this.coopShown = true;
@@ -273,7 +276,7 @@ export class Ui {
   /** serverless pairing screen. Text boxes keep what is typed, so call it only when the step changes. */
   showPair(p: PairInfo): void {
     const out = (label: string, text: string) =>
-      `<p class="sub">${label}</p><textarea id="pairOut" readonly rows="4">${text}</textarea><button data-action="pair-copy">Copy</button>`;
+      `<p class="sub">${label}</p><textarea id="pairOut" readonly rows="4">${esc(text)}</textarea><button data-action="pair-copy">Copy</button>`;
     let body: string;
     if (p.mode === 'host') {
       body = p.offer
@@ -289,7 +292,7 @@ export class Ui {
         <textarea id="pairIn" rows="4" placeholder="Paste the host block" spellcheck="false"></textarea>
         <button class="big" data-action="pair-join" ${p.busy ? 'disabled' : ''}>Make reply</button>`;
     }
-    this.show(`<div class="screen coop pair"><h1>Pair by paste</h1>${body}${p.error ? `<p class="err">${p.error}</p>` : ''}<button data-action="pair-cancel">Cancel</button></div>`);
+    this.show(`<div class="screen coop pair"><h1>Pair by paste</h1>${body}${p.error ? `<p class="err">${esc(p.error)}</p>` : ''}<button data-action="pair-cancel">Cancel</button></div>`);
     this.coopShown = false;
   }
 

@@ -1,4 +1,5 @@
 import { Link, WebSocketTransport, type Transport } from '../link/client';
+import { pickRelay } from '../link/hosts';
 import type { Envelope, Messages } from '../link/protocol';
 import { RELAY_PATH } from '../link/relay-path';
 import { CHARACTERS } from './characters';
@@ -10,12 +11,11 @@ import { TUNING } from './tuning';
 import { UPGRADES, emptyLevels, type Levels } from './upgrades';
 
 /**
- * Where the relay is. Normally next to this page (npm run lan), but `?relay=ip:port` points at another machine's, so a
+ * Where the relay is. Normally next to this page (npm run lan), but `?relay=ip:port` points at another machine's (only on this computer or a private network), so a
  * phone that opened this game can join a room the other game is hosting.
  */
 export function relayHost(): string {
-  const r = new URLSearchParams(location.search).get('relay');
-  return r && /^[\w.-]+(:\d+)?$/.test(r) ? r : location.host;
+  return pickRelay(new URLSearchParams(location.search).get('relay'), location.host);
 }
 
 export const relayTransport = (): Transport =>

@@ -203,7 +203,7 @@ function renderPanel(): void {
   $('manaBar').style.width = `${(hero.mana / hero.maxMana) * 100}%`;
   $('manaTxt').textContent = `Mana ${hero.mana} / ${hero.maxMana}`;
   $('ups').innerHTML = UPGRADES.map((u) => {
-    const lv = hero!.levels[u.id] ?? 0;
+    const lv = Math.max(0, Math.min(99, Number(hero!.levels[u.id]) || 0)); // from another device: a number, never markup
     const cost = lv >= u.max ? null : upgradeCost(u, lv);
     const dis = cost === null || nutrients < cost ? 'disabled' : '';
     return `<div class="up"><span>${u.icon} ${u.name} <small>${lv}/${u.max}</small></span><button data-up="${u.id}" ${dis}>${cost === null ? 'MAX' : cost}</button></div>`;
@@ -215,7 +215,7 @@ $('ups').addEventListener('click', (e) => {
   const id = (e.target as HTMLElement).closest<HTMLElement>('[data-up]')?.dataset.up;
   const def = UPGRADES.find((u) => u.id === id);
   if (!hero || !def) return;
-  const lv = hero.levels[def.id] ?? 0;
+  const lv = Math.max(0, Math.min(99, Number(hero.levels[def.id]) || 0));
   if (lv >= def.max || nutrients < upgradeCost(def, lv)) return;
   nutrients -= upgradeCost(def, lv);
   hero.levels[def.id] = lv + 1;
